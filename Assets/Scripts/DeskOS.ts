@@ -291,6 +291,16 @@ export class DeskOS extends BaseScriptComponent {
       const folders = this.uiDesk.folderChoices()
       const seen = await this.brain.understand(frame.base64, folders)
 
+      if (seen === null) {
+        print("[DeskOS] No understanding — filing under a timestamp.")
+      } else {
+        print(
+          "[DeskOS] Understood: '" + seen.title + "' (" + seen.kind + ") -> " +
+            seen.folderSlug + " — " + seen.rationale +
+            (seen.body === null ? "" : " [" + seen.body.length + " lines]")
+        )
+      }
+
       const title = seen === null ? "Photo " + this.clock() : seen.title
       const meta = seen === null ? "JPG" : seen.meta
       const kind = seen === null ? ("image" as ContentKind) : seen.kind

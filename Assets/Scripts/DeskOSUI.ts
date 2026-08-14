@@ -202,6 +202,12 @@ interface ContentDef {
   meta: string
   /** Document body, text kind only — shown in the reader. */
   body?: string[]
+  /**
+   * A chip built empty and parked, kept only so captures have somewhere to
+   * land. Chips cannot be created once the scene has started, so the pool has
+   * to be bigger than what it initially shows.
+   */
+  reserve?: boolean
 }
 
 /** Mock contents — no file system behind them yet, purely representative. */
@@ -236,13 +242,21 @@ const CONTENTS: Record<string, ContentDef[]> = {
       ]
     },
     {kind: "image", name: "Wireframe", meta: "PNG · 1.2 MB"},
-    {kind: "video", name: "Demo reel", meta: "1:24"}
+    {kind: "video", name: "Demo reel", meta: "1:24"},
+    // Reserves — built empty and parked so captures have somewhere to land.
+    {kind: "image", name: "", meta: "", reserve: true},
+    {kind: "image", name: "", meta: "", reserve: true},
+    {kind: "text", name: "", meta: "", reserve: true}
   ],
   Photos: [
     {kind: "image", name: "Sunset", meta: "JPG · 3.8 MB"},
     {kind: "image", name: "Studio", meta: "JPG · 2.1 MB"},
     {kind: "image", name: "Team", meta: "JPG · 4.4 MB"},
-    {kind: "video", name: "Timelapse", meta: "0:42"}
+    {kind: "video", name: "Timelapse", meta: "0:42"},
+    // Reserves — built empty and parked so captures have somewhere to land.
+    {kind: "image", name: "", meta: "", reserve: true},
+    {kind: "image", name: "", meta: "", reserve: true},
+    {kind: "text", name: "", meta: "", reserve: true}
   ],
   Personal: [
     {
@@ -260,7 +274,11 @@ const CONTENTS: Record<string, ContentDef[]> = {
     },
     {kind: "audio", name: "Voice memo", meta: "0:38"},
     {kind: "image", name: "Passport", meta: "JPG · 1.9 MB"},
-    {kind: "audio", name: "Idea 04", meta: "1:05"}
+    {kind: "audio", name: "Idea 04", meta: "1:05"},
+    // Reserves — built empty and parked so captures have somewhere to land.
+    {kind: "image", name: "", meta: "", reserve: true},
+    {kind: "image", name: "", meta: "", reserve: true},
+    {kind: "text", name: "", meta: "", reserve: true}
   ]
 }
 
@@ -1030,6 +1048,8 @@ export class DeskOSUI extends BaseScriptComponent {
       }
     }
 
+    for (const card of this.cards) this.reflowRing(card)
+
     return {seated: claimed.length, unseated}
   }
 
@@ -1045,7 +1065,9 @@ export class DeskOSUI extends BaseScriptComponent {
     for (const card of this.cards) {
       const examples: string[] = []
       for (const chip of card.contents) {
-        if (!chip.root.enabled) continue
+        // Not root.enabled — every chip in a closed folder is disabled, so that
+        // would report an entire folder as empty. Parked is the real test.
+        if (chip.delay === Number.MAX_VALUE) continue
         if (chip.def.name.length === 0) continue
         examples.push(chip.def.name)
       }
@@ -1079,7 +1101,8 @@ export class DeskOSUI extends BaseScriptComponent {
     let seat: ContentHandles | null = null
     for (const chip of card.contents) {
       if (chip.def.kind !== kind) continue
-      if (chip.root.enabled) continue
+      // Parked, not disabled: a closed folder disables all of its chips.
+      if (chip.delay < Number.MAX_VALUE) continue
       seat = chip
       break
     }
@@ -1097,8 +1120,12 @@ export class DeskOSUI extends BaseScriptComponent {
     // not wait behind everything already on the desk. p starts at 0 so the
     // rate limiter animates it out over CONTENT_ITEM_DUR even when the folder
     // is already open and its clock is long past.
-    seat.root.enabled = true
-    seat.tetherObj.enabled = true
+    // Rejoin the ring first so every chip gets an even share of it, then
+    // jump the queue: a capture should come out in front of what is already
+    // on the desk, not wait behind it. p starts at 0 so the rate limiter
+    // animates it even when the folder is open and its clock has run on.
+    seat.delay = 0
+    this.reflowRing(card)
     seat.delay = 0
     seat.p = 0
     seat.pinned = false
@@ -1450,7 +1477,8 @@ export class DeskOSUI extends BaseScriptComponent {
         kind: def.kind,
         name: def.name,
         meta: def.meta,
-        body: def.body === undefined ? undefined : def.body.slice()
+        body: def.body === undefined ? undefined : def.body.slice(),
+        reserve: def.reserve
       }
       const btn = this.buildContentCard(root, ownDef, manipOut, refs)
       root.enabled = false
@@ -1487,9 +1515,36 @@ export class DeskOSUI extends BaseScriptComponent {
       }
       card.contents.push(item)
       this.bindContent(item, btn, manipOut[0])
+
+      if (def.reserve === true) {
+        item.delay = Number.MAX_VALUE
+        item.def.name = ""
+        if (item.nameText) item.nameText.text = ""
+      }
     }
-    card.openDuration =
-      CONTENT_START_DELAY + (n > 0 ? (n - 1) * CONTENT_STAGGER : 0) + CONTENT_ITEM_DUR
+    this.reflowRing(card)
+    this.refreshOpenDuration(card)
+  }
+
+  /**
+   * Spread whatever is actually on the ring evenly around it.
+   *
+   * Angles cannot be fixed at build time once the pool holds reserves and cloud
+   * files that may not seat — a fixed angle leaves a hole in the ring wherever
+   * an unused chip would have been. Recomputing over the enabled chips keeps
+   * the ring even however many files the folder ends up holding.
+   */
+  private reflowRing(card: CardHandles): void {
+    const live: ContentHandles[] = []
+    for (const chip of card.contents) {
+      if (chip.delay < Number.MAX_VALUE) live.push(chip)
+    }
+    const n = live.length
+    if (n === 0) return
+    for (let i = 0; i < n; i++) {
+      live[i].angle = ((CONTENT_RING_START_DEG + (360 / n) * i) * Math.PI) / 180
+      live[i].delay = CONTENT_START_DELAY + i * CONTENT_STAGGER
+    }
   }
 
   /** One mock content chip. Silhouette, accent and body treatment all differ per kind. */
@@ -1988,6 +2043,9 @@ export class DeskOSUI extends BaseScriptComponent {
   private refreshOpenDuration(card: CardHandles): void {
     let maxDelay = 0
     for (const it of card.contents) {
+      // Parked chips carry MAX_VALUE; counting them would make the folder's
+      // clock unreachable and every file would stay mid-emergence forever.
+      if (it.delay === Number.MAX_VALUE) continue
       if (it.delay > maxDelay) maxDelay = it.delay
     }
     card.openDuration = maxDelay + CONTENT_ITEM_DUR

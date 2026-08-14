@@ -19,7 +19,7 @@ import {withTimeout} from "./DeskOSAsync"
  * `-preview` id — those 404 through the gateway even though they are valid
  * against Google directly.
  */
-const MODEL = "gemini-2.0-flash"
+const MODEL = "gemini-2.5-flash"
 
 /** Understanding is a nicety, not the capture itself — never let it hang the pinch. */
 const THINK_TIMEOUT_S = 12.0
