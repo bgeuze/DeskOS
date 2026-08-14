@@ -15,7 +15,7 @@ import {DeskOSAudio} from "./DeskOSAudio"
 import {DeskOSSurfacePlacer, SurfaceReject, SurfaceSample} from "./DeskOSSurfacePlacer"
 import {CloudDesk, DeskOSCloud} from "./DeskOSCloud"
 import {DeskOSCapture} from "./DeskOSCapture"
-import {DeskIntent, DeskOSBrain, interpretUtterance} from "./DeskOSBrain"
+import {DeskIntent, DeskOSBrain, interpretUtterance, planTidy} from "./DeskOSBrain"
 import {DeskOSVoice} from "./DeskOSVoice"
 import {ContentKind} from "./DeskOSTypes"
 import {
@@ -39,6 +39,9 @@ const handlePrefab = requireAsset("../GeneratedMeshes/DeskHandle.glb") as Object
 
 const remoteMediaModule = require("LensStudio:RemoteMediaModule") as RemoteMediaModule
 const internetModule = require("LensStudio:InternetModule") as InternetModule
+
+/** Gap between one file being re-filed and the next, so the move stays readable. */
+const TIDY_STAGGER_MS = 550
 
 enum DeskState {
   /** Looking for a surface. Hint + reticle visible, desk hidden. */
@@ -101,6 +104,7 @@ export class DeskOS extends BaseScriptComponent {
   private voice: DeskOSVoice = new DeskOSVoice()
   /** One capture at a time — a second pinch mid-flight would race the first. */
   private capturing = false
+  private tidying = false
   /** Distinguishes concurrent-ish captures; the display name is not stable. */
   private captureSeq = 0
   /** Captures land in whichever folder is open, else the first one. */
@@ -458,13 +462,56 @@ export class DeskOS extends BaseScriptComponent {
     }
 
     if (intent.action === "tidy") {
-      // Deliberately honest rather than silently doing nothing: the desk-wide
-      // reorganise is not built yet.
-      this.uiDesk.setStatus("Tidying is not wired up yet")
+      this.tidyDesk()
       return
     }
 
     this.uiDesk.setStatus(intent.say.length > 0 ? intent.say : "Not sure what that meant")
+  }
+
+  /**
+   * Re-file the whole desk by meaning.
+   *
+   * The moves are staggered rather than applied at once. All-at-once is a
+   * re-layout — every file jumps and the user sees a new arrangement without
+   * understanding how it happened. One file at a time reads as tidying, and it
+   * stays legible: you can follow where each thing went.
+   */
+  private async tidyDesk(): Promise<void> {
+    if (this.tidying) return
+    this.tidying = true
+
+    try {
+      this.uiDesk.setStatus("Looking at everything…")
+      const plan = await planTidy(this.uiDesk.folderChoices(), this.uiDesk.fileList())
+      if (plan === null) {
+        this.uiDesk.setStatus("Could not tidy")
+        return
+      }
+      if (plan.moves.length === 0) {
+        this.uiDesk.setStatus("Already where it belongs")
+        return
+      }
+
+      print("[DeskOS] Tidy: " + plan.moves.length + " file(s) to move.")
+      for (let i = 0; i < plan.moves.length; i++) {
+        const move = plan.moves[i]
+        setTimeout(() => {
+          if (this.uiDesk.moveFileToFolder(move.fileName, move.folderSlug)) {
+            this.audio?.playSurfaceLock()
+            this.uiDesk.setStatus(move.fileName + " → " + this.uiDesk.getFolderTitle(
+              this.titleCase(move.folderSlug)
+            ))
+          }
+          if (i === plan.moves.length - 1) this.uiDesk.setStatus(plan.say)
+        }, i * TIDY_STAGGER_MS)
+      }
+    } catch (e) {
+      print("[DeskOS] Tidy failed: " + e)
+      this.uiDesk.setStatus("Could not tidy")
+    } finally {
+      this.tidying = false
+    }
   }
 
   /** Open folder wins, so a capture lands where the user is looking. */

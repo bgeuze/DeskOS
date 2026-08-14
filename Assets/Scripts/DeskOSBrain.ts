@@ -313,3 +313,105 @@ export async function interpretUtterance(
     return null
   }
 }
+
+/** One file's new home, as decided by a desk-wide reorganise. */
+export interface TidyMove {
+  fileName: string
+  folderSlug: string
+}
+
+const TIDY_SCHEMA = {
+  type: "OBJECT",
+  properties: {
+    moves: {
+      type: "ARRAY",
+      description: "Every file on the desk, each with the folder it belongs in.",
+      items: {
+        type: "OBJECT",
+        properties: {
+          fileName: {type: "STRING", description: "Copied exactly from the list given."},
+          folderSlug: {type: "STRING", description: "One of the offered folder slugs."}
+        },
+        required: ["fileName", "folderSlug"]
+      }
+    },
+    say: {type: "STRING", description: "Under eight words describing what changed."}
+  },
+  required: ["moves", "say"]
+}
+
+/**
+ * Re-file everything on the desk by what it is about.
+ *
+ * Returns only the files that should actually move. Filtering here rather than
+ * in the caller keeps the animation honest: a file that is already where it
+ * belongs should sit still, not fly out and land back in the same place.
+ */
+export async function planTidy(
+  folders: FolderChoice[],
+  files: {name: string; folderSlug: string}[]
+): Promise<{moves: TidyMove[]; say: string} | null> {
+  if (files.length === 0) return {moves: [], say: "nothing to tidy"}
+
+  const folderLines: string[] = []
+  for (const f of folders) folderLines.push('- "' + f.slug + '" (' + f.title + ")")
+
+  const fileLines: string[] = []
+  for (const f of files) fileLines.push('- "' + f.name + '" currently in ' + f.folderSlug)
+
+  const instruction =
+    "You are tidying a spatial desktop. Decide where every file belongs, by what " +
+    "it is about rather than where it happens to sit now.\n\n" +
+    "Folders:\n" + folderLines.join("\n") + "\n\n" +
+    "Files:\n" + fileLines.join("\n") + "\n\n" +
+    "Return an entry for every file, using its exact name and one of the folder " +
+    "slugs above. Leaving a file where it is, is a valid and often correct answer — " +
+    "a tidy desk is not one where everything moved."
+
+  const request: GeminiTypes.Models.GenerateContentRequest = {
+    model: MODEL,
+    type: "generateContent",
+    body: {
+      systemInstruction: {role: "user", parts: [{text: instruction}]},
+      contents: [{role: "user", parts: [{text: "Tidy my desk."}]}],
+      generationConfig: {
+        responseMimeType: "application/json",
+        responseSchema: TIDY_SCHEMA,
+        temperature: 0.2,
+        maxOutputTokens: 1200
+      }
+    }
+  }
+
+  try {
+    const response = await withTimeout(Gemini.models(request), THINK_TIMEOUT_S)
+    if (response === null) {
+      print("[DeskOSBrain] Tidy timed out.")
+      return null
+    }
+    const parsed = JSON.parse(response.candidates[0].content.parts[0].text)
+
+    const moves: TidyMove[] = []
+    const raw = Array.isArray(parsed.moves) ? parsed.moves : []
+    for (const entry of raw) {
+      const name = String(entry.fileName === undefined ? "" : entry.fileName)
+      const slug = String(entry.folderSlug === undefined ? "" : entry.folderSlug)
+
+      let current: string | null = null
+      for (const f of files) if (f.name === name) current = f.folderSlug
+      if (current === null) continue // never invented a file
+
+      let knownFolder = false
+      for (const f of folders) if (f.slug === slug) knownFolder = true
+      if (!knownFolder) continue
+
+      if (current === slug) continue // already home
+      moves.push({fileName: name, folderSlug: slug})
+    }
+
+    return {moves, say: String(parsed.say === undefined ? "desk tidied" : parsed.say)}
+  } catch (e) {
+    print("[DeskOSBrain] Tidy failed: " + e)
+    return null
+  }
+}
