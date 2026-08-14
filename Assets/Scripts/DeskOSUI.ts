@@ -1028,7 +1028,7 @@ export class DeskOSUI extends BaseScriptComponent {
     for (const file of files) {
       const card = this.cardById(this.titleCaseSlug(file.folderSlug))
       if (card === null) {
-        unseated.push(file.name)
+        unseated.push(file.name + " (" + file.kind + " in " + file.folderSlug + ")")
         continue
       }
       let seat: ContentHandles | null = null
@@ -1039,7 +1039,7 @@ export class DeskOSUI extends BaseScriptComponent {
         break
       }
       if (seat === null) {
-        unseated.push(file.name)
+        unseated.push(file.name + " (" + file.kind + " in " + file.folderSlug + ")")
         continue
       }
       claimed.push(seat)
