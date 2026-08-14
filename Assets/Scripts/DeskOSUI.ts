@@ -326,6 +326,13 @@ interface ViewerHandles {
   elapsed: Text
   /** False until a track has actually been handed over; transport stays inert. */
   hasTrack: boolean
+  /**
+   * A track arrived while the panel was still off. AudioComponent throws if it
+   * is played on a disabled object, and the download can land in the same frame
+   * the viewer opens — so the intent is remembered and honoured once the panel
+   * is genuinely up.
+   */
+  wantPlay: boolean
 }
 
 // ── Release-time tidying ─────────────────────────────────────────────────────
@@ -1181,11 +1188,34 @@ export class DeskOSUI extends BaseScriptComponent {
     return true
   }
 
+  /**
+   * Size a surface to a texture's own proportions, inside the space reserved
+   * for it.
+   *
+   * The reserved boxes are wide letterbox strips, so a photo stretched to fill
+   * one comes out visibly squashed. Fitting instead of filling wastes a little
+   * space and keeps the picture the shape it actually is.
+   */
+  private fitToTexture(
+    rr: RoundedRectangle,
+    texture: Texture,
+    maxW: number,
+    maxH: number
+  ): void {
+    const tw = texture.getWidth()
+    const th = texture.getHeight()
+    if (tw <= 0 || th <= 0) return
+    const k = Math.min(maxW / tw, maxH / th)
+    rr.size = new vec2(tw * k, th * k)
+  }
+
   /** Apply a downloaded photo to a file's chip thumbnail. */
   setFileTexture(name: string, texture: Texture): void {
     for (const card of this.cards) {
       for (const chip of card.contents) {
         if (chip.def.name !== name || chip.thumb === null) continue
+        const sz = KIND_SIZE[chip.def.kind]
+        this.fitToTexture(chip.thumb, texture, sz.x * 0.82, sz.y * 0.52)
         chip.thumb.useTexture = true
         chip.thumb.texture = texture
         chip.thumb.opacity = 1
@@ -1197,6 +1227,8 @@ export class DeskOSUI extends BaseScriptComponent {
   setViewerTexture(texture: Texture): void {
     const v = this.viewer
     if (v === null) return
+    // The whole body area, not the letterbox strip the placeholder used.
+    this.fitToTexture(v.imageSwatch, texture, VIEWER_W - 7, VIEWER_H - 6)
     v.imageSwatch.useTexture = true
     v.imageSwatch.texture = texture
     v.imageSwatch.opacity = 1
@@ -1210,8 +1242,9 @@ export class DeskOSUI extends BaseScriptComponent {
     if (v === null) return
     v.audio.audioTrack = track
     v.hasTrack = true
-    v.audio.play(1)
+    v.wantPlay = true
     v.playLabel.text = "Pause"
+    print("[UI] audio track attached")
   }
 
   /** Storage path of the file whose viewer is open, if it has one. */
@@ -1317,7 +1350,8 @@ export class DeskOSUI extends BaseScriptComponent {
       playLabel: audioRefs.playLabel as Text,
       progressFill: audioRefs.fill as RoundedRectangle,
       elapsed: audioRefs.elapsed as Text,
-      hasTrack: false
+      hasTrack: false,
+      wantPlay: false
     }
 
     const bind = (): void => {
@@ -1348,6 +1382,14 @@ export class DeskOSUI extends BaseScriptComponent {
    */
   private updateTransport(v: ViewerHandles): void {
     if (!v.hasTrack) return
+
+    // Deferred start — see wantPlay. Safe here because updateViewer only
+    // reaches this once the panel is enabled.
+    if (v.wantPlay) {
+      v.wantPlay = false
+      v.audio.play(1)
+      print("[UI] audio play() — duration " + v.audio.duration + "s")
+    }
 
     const duration = v.audio.duration
     if (duration > 0) {
@@ -1570,10 +1612,12 @@ export class DeskOSUI extends BaseScriptComponent {
     // previous one. Without this, opening a second photo shows the first one's
     // picture, and a second recording plays the first one's audio.
     v.imageSwatch.useTexture = false
+    v.imageSwatch.size = new vec2(VIEWER_W - 7, VIEWER_H - 10)
     v.imageSwatch.opacity = 0.45
     v.imageIcon.enabled = true
 
     this.silenceViewer(v)
+    v.wantPlay = false
     v.playLabel.text = "Play"
     v.elapsed.text = "0:00"
     this.setProgress(v.progressFill, 0)

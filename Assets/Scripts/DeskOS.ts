@@ -394,6 +394,12 @@ export class DeskOS extends BaseScriptComponent {
    */
   private onViewerOpened(): void {
     const open = this.uiDesk.getOpenFile()
+    print(
+      "[DeskOS] viewerOpened " +
+        (open === null
+          ? "null"
+          : open.name + " kind=" + open.kind + " path=" + open.storagePath)
+    )
     if (open === null || open.storagePath === null) return
 
     if (open.kind === "image") {
