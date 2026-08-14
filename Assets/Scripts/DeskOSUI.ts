@@ -325,8 +325,20 @@ interface ViewerHandles {
   lines: Text[]
   /** The big image surface, swapped to the real photo when one is loaded. */
   imageSwatch: RoundedRectangle
+  /**
+   * Placeholder glyph, shown only while the surface has no real photo. Once a
+   * photo lands it would sit on top of the picture, which is exactly what a
+   * placeholder must not do.
+   */
+  imageIcon: SceneObject
   /** Plays whatever audio file the open viewer refers to. */
   audio: AudioComponent
+  /** Transport for that player. */
+  playLabel: Text
+  progressFill: RoundedRectangle
+  elapsed: Text
+  /** False until a track has actually been handed over; transport stays inert. */
+  hasTrack: boolean
 }
 
 // ── Release-time tidying ─────────────────────────────────────────────────────
@@ -1223,6 +1235,8 @@ export class DeskOSUI extends BaseScriptComponent {
     v.imageSwatch.useTexture = true
     v.imageSwatch.texture = texture
     v.imageSwatch.opacity = 1
+    // The glyph stood in for a picture that has now arrived.
+    v.imageIcon.enabled = false
   }
 
   /** Hand the open viewer a track and start it. */
@@ -1230,7 +1244,9 @@ export class DeskOSUI extends BaseScriptComponent {
     const v = this.viewer
     if (v === null) return
     v.audio.audioTrack = track
+    v.hasTrack = true
     v.audio.play(1)
+    v.playLabel.text = "Pause"
   }
 
   /** Storage path of the file whose viewer is open, if it has one. */
@@ -1302,12 +1318,21 @@ export class DeskOSUI extends BaseScriptComponent {
       "Close"
 
     const lines: Text[] = []
-    const swatchRef: {swatch: RoundedRectangle | null} = {swatch: null}
+    const swatchRef: {swatch: RoundedRectangle | null; icon: SceneObject | null} = {
+      swatch: null,
+      icon: null
+    }
+    const audioRefs: {
+      play: Button | null
+      playLabel: Text | null
+      fill: RoundedRectangle | null
+      elapsed: Text | null
+    } = {play: null, playLabel: null, fill: null, elapsed: null}
     const bodies: Record<ContentKind, SceneObject> = {
       text: this.buildViewerText(root, lines),
       image: this.buildViewerImage(root, swatchRef),
       video: this.buildViewerVideo(root),
-      audio: this.buildViewerAudio(root)
+      audio: this.buildViewerAudio(root, audioRefs)
     }
 
     // One player for the whole viewer — the open file's track is swapped in.
@@ -1322,16 +1347,51 @@ export class DeskOSUI extends BaseScriptComponent {
       bodies,
       lines,
       imageSwatch: swatchRef.swatch as RoundedRectangle,
-      audio
+      imageIcon: swatchRef.icon as SceneObject,
+      audio,
+      playLabel: audioRefs.playLabel as Text,
+      progressFill: audioRefs.fill as RoundedRectangle,
+      elapsed: audioRefs.elapsed as Text,
+      hasTrack: false
     }
 
     const bind = (): void => {
       closeBtn.onTriggerUp.add(() => {
         this.viewerItem = null
       })
+      audioRefs.play?.onTriggerUp.add(() => {
+        const v = this.viewer
+        if (v === null || !v.hasTrack) return
+        // isPaused before isPlaying: a paused player reports neither playing
+        // nor finished, and resume() is the only thing that revives it.
+        if (v.audio.isPaused()) v.audio.resume()
+        else if (v.audio.isPlaying()) v.audio.pause()
+        else v.audio.play(1)
+      })
     }
     if (this.started) bind()
     else this.createEvent("OnStartEvent").bind(bind)
+  }
+
+  /**
+   * Keep the transport honest.
+   *
+   * Position and duration are read back off the player every frame rather than
+   * integrated from dt — a track that stalls buffering or finishes early would
+   * otherwise leave the bar advancing over silence.
+   */
+  private updateTransport(v: ViewerHandles): void {
+    if (!v.hasTrack) return
+
+    const duration = v.audio.duration
+    if (duration > 0) {
+      this.setProgress(v.progressFill, v.audio.position / duration)
+      v.elapsed.text = this.timecode(v.audio.position) + " / " + this.timecode(duration)
+    }
+
+    const playing = v.audio.isPlaying() && !v.audio.isPaused()
+    const wanted = playing ? "Pause" : "Play"
+    if (v.playLabel.text !== wanted) v.playLabel.text = wanted
   }
 
   private viewerBody(root: SceneObject, name: string): SceneObject {
@@ -1357,7 +1417,10 @@ export class DeskOSUI extends BaseScriptComponent {
     return c
   }
 
-  private buildViewerImage(root: SceneObject, refs: {swatch: RoundedRectangle | null}): SceneObject {
+  private buildViewerImage(
+    root: SceneObject,
+    refs: {swatch: RoundedRectangle | null; icon: SceneObject | null}
+  ): SceneObject {
     const c = this.viewerBody(root, "BodyImage")
     const sw = this.obj(c, "Swatch", new vec3(0, 0, 0))
     const rr = sw.createComponent(RoundedRectangle.getTypeName()) as RoundedRectangle
@@ -1366,7 +1429,7 @@ export class DeskOSUI extends BaseScriptComponent {
     rr.cornerRadius = 0.9
     rr.backgroundColor = KIND_ACCENT.image
     rr.opacity = 0.45
-    this.freeIcon(c, ICON_IMAGE, 4.0, KIND_ACCENT.image, new vec3(0, 0, 0.08))
+    refs.icon = this.freeIcon(c, ICON_IMAGE, 4.0, KIND_ACCENT.image, new vec3(0, 0, 0.08))
     return c
   }
 
@@ -1393,9 +1456,19 @@ export class DeskOSUI extends BaseScriptComponent {
     return c
   }
 
-  private buildViewerAudio(root: SceneObject): SceneObject {
+  private buildViewerAudio(
+    root: SceneObject,
+    refs: {
+      play: Button | null
+      playLabel: Text | null
+      fill: RoundedRectangle | null
+      elapsed: Text | null
+    }
+  ): SceneObject {
     const c = this.viewerBody(root, "BodyAudio")
-    this.freeIcon(c, ICON_AUDIO, 3.6, KIND_ACCENT.audio, new vec3(0, 3.4, 0.08))
+
+    // No kind glyph here. The transport below says "this is audio" by being
+    // usable, which a decorative icon never does.
 
     // A long waveform reads as "this is a recording" far better than a bar chart.
     const bars = 29
@@ -1413,17 +1486,61 @@ export class DeskOSUI extends BaseScriptComponent {
       )
     }
 
+    // Transport. The progress bar is driven from the player rather than faked,
+    // so what the user sees is what is actually being heard.
     const track = VIEWER_W - 9
     this.plate(c, new vec2(track, 0.42), KIND_ACCENT.audio, 0.21, new vec3(0, -4.6, 0.08), 0.28)
-    this.plate(
+    refs.fill = this.plate(
       c,
-      new vec2(track * 0.38, 0.42),
+      new vec2(0.01, 0.42),
       KIND_ACCENT.audio,
       0.21,
-      new vec3(-track * 0.31, -4.6, 0.1),
+      new vec3(-track / 2, -4.6, 0.1),
       0.95
     )
+
+    const playObj = this.obj(c, "Play", new vec3(-track / 2 + 2.6, -6.9, 0.12))
+    const playBtn = playObj.createComponent(Button.getTypeName()) as Button
+    playBtn.size = new vec3(5.2, 2.8, 1)
+    refs.play = playBtn
+    refs.playLabel = this.freeText(
+      playObj,
+      "PlayLabel",
+      new vec3(0, 0, 0.14),
+      "Caption",
+      COLOR_PRIMARY,
+      4.8
+    )
+    refs.playLabel.text = "Play"
+
+    refs.elapsed = this.freeText(
+      c,
+      "Elapsed",
+      new vec3(track / 2 - 3.0, -6.9, 0.12),
+      "Caption",
+      COLOR_SECONDARY,
+      6.0
+    )
+    refs.elapsed.text = "0:00"
     return c
+  }
+
+  /** Progress bar width, anchored left so it grows rather than centres. */
+  private setProgress(fill: RoundedRectangle, fraction: number): void {
+    const track = VIEWER_W - 9
+    const w = Math.max(0.01, track * clamp01(fraction))
+    fill.size = new vec2(w, 0.42)
+    fill.getSceneObject().getTransform().setLocalPosition(
+      new vec3(-track / 2 + w / 2, -4.6, 0.1)
+    )
+  }
+
+  /** mm:ss for a position in seconds. */
+  private timecode(seconds: number): string {
+    const total = Math.max(0, Math.floor(seconds))
+    const m = Math.floor(total / 60)
+    const s2 = total - m * 60
+    return m + ":" + (s2 < 10 ? "0" : "") + s2
   }
 
   private freeIcon(
@@ -1432,7 +1549,7 @@ export class DeskOSUI extends BaseScriptComponent {
     sizeCM: number,
     tint: vec4,
     pos: vec3
-  ): void {
+  ): SceneObject {
     const so = this.obj(parent, "Icon", pos)
     const img = so.createComponent("Component.Image") as Image
     const mat = imageMaterial.clone() // CLONE — never share across textures
@@ -1443,6 +1560,7 @@ export class DeskOSUI extends BaseScriptComponent {
     img.addMaterial(mat)
     img.mainPass.baseColor = tint
     so.getTransform().setLocalScale(new vec3(sizeCM, sizeCM, 1))
+    return so
   }
 
   private toggleViewer(item: ContentHandles): void {
@@ -1469,6 +1587,19 @@ export class DeskOSUI extends BaseScriptComponent {
       v.bodies[k].enabled = k === def.kind
     }
 
+    // Both surfaces are shared across every file, so each open has to clear the
+    // previous one. Without this, opening a second photo shows the first one's
+    // picture, and a second recording plays the first one's audio.
+    v.imageSwatch.useTexture = false
+    v.imageSwatch.opacity = 0.45
+    v.imageIcon.enabled = true
+
+    v.audio.stop(false)
+    v.hasTrack = false
+    v.playLabel.text = "Play"
+    v.elapsed.text = "0:00"
+    this.setProgress(v.progressFill, 0)
+
     if (def.kind === "text") {
       const body = def.body ?? []
       for (let i = 0; i < v.lines.length; i++) {
@@ -1485,10 +1616,18 @@ export class DeskOSUI extends BaseScriptComponent {
     this.viewerT += (target - this.viewerT) * Math.min(1, dt * VIEWER_SPEED)
 
     if (this.viewerT < 0.006 && target === 0) {
-      if (v.root.enabled) v.root.enabled = false
+      if (v.root.enabled) {
+        v.root.enabled = false
+        // A closed viewer that is still audible is a bug the user hears
+        // before they see it.
+        v.audio.stop(false)
+        v.hasTrack = false
+      }
       return
     }
     if (!v.root.enabled) v.root.enabled = true
+
+    this.updateTransport(v)
 
     const e = easeOutCubic(clamp01(this.viewerT))
     const from = this.viewerFrom

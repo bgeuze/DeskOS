@@ -232,14 +232,36 @@ export class DeskOSCloud {
     const client = this.client
     if (client === null) return
 
-    const existing = await client.from("desk_folders").select("id").limit(1)
-    if (existing.error !== null) {
-      print("[DeskOSCloud] Bootstrap check failed: " + JSON.stringify(existing.error))
+    // Folders AND files, because seeding is two round trips and can be
+    // interrupted between them. Checking only folders makes a half-seeded desk
+    // look finished, and it then stays empty forever.
+    const existingFolders = await client.from("desk_folders").select("id").limit(1)
+    if (existingFolders.error !== null) {
+      print("[DeskOSCloud] Bootstrap check failed: " + JSON.stringify(existingFolders.error))
       return
     }
-    if (existing.data !== null && existing.data.length > 0) return
+    const existingFiles = await client.from("desk_files").select("id").limit(1)
+    if (existingFiles.error !== null) {
+      print("[DeskOSCloud] Bootstrap check failed: " + JSON.stringify(existingFiles.error))
+      return
+    }
 
-    print("[DeskOSCloud] New user — seeding starting desk.")
+    const haveFolders = existingFolders.data !== null && existingFolders.data.length > 0
+    const haveFiles = existingFiles.data !== null && existingFiles.data.length > 0
+    if (haveFolders && haveFiles) return
+
+    // A desk with folders but no files is a partial seed. Clear the folders so
+    // the insert below can recreate them and their ids line up with the files.
+    if (haveFolders) {
+      print("[DeskOSCloud] Partial desk found — reseeding.")
+      const wipe = await client.from("desk_folders").delete().eq("user_id", this.uid)
+      if (wipe.error !== null) {
+        print("[DeskOSCloud] Reseed failed: " + JSON.stringify(wipe.error))
+        return
+      }
+    } else {
+      print("[DeskOSCloud] New user — seeding starting desk.")
+    }
 
     const folderRows = [
       {slug: "projects", title: "Projects", subtitle: "Work in progress", sort_index: 0},
