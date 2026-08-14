@@ -716,6 +716,7 @@ export class DeskOSUI extends BaseScriptComponent {
 
   /** Radio-select a card (or pass null to clear). Drives toggle state + lift. */
   setSelected(id: string | null): void {
+    print("[UI] setSelected " + id)
     this.selectedId = id
     for (const card of this.cards) {
       card.selected = card.def.id === id
@@ -1369,6 +1370,7 @@ export class DeskOSUI extends BaseScriptComponent {
 
     const bind = (): void => {
       closeBtn.onTriggerUp.add(() => {
+        print("[UI] viewer CLOSE (button)")
         this.viewerItem = null
       })
       audioRefs.play?.onTriggerUp.add(() => {
@@ -1577,10 +1579,12 @@ export class DeskOSUI extends BaseScriptComponent {
 
   private toggleViewer(item: ContentHandles): void {
     if (this.viewerItem === item) {
+      print("[UI] viewer CLOSE (toggle) " + item.def.name)
       this.viewerItem = null
       return
     }
     this.viewerItem = item
+    print("[UI] viewer OPEN " + item.def.name)
     // Launch from wherever the chip currently is, so the panel grows out of the
     // file rather than fading in somewhere unrelated.
     this.viewerFrom = item.root.getTransform().getLocalPosition()
@@ -1629,6 +1633,7 @@ export class DeskOSUI extends BaseScriptComponent {
 
     if (this.viewerT < 0.006 && target === 0) {
       if (v.root.enabled) {
+        print("[UI] viewer panel disabled")
         v.root.enabled = false
         // A closed viewer that is still audible is a bug the user hears
         // before they see it.
@@ -2172,6 +2177,7 @@ export class DeskOSUI extends BaseScriptComponent {
     // A viewer whose file has retreated into a closing folder has nothing left
     // to belong to, so it closes with it.
     if (this.viewerItem !== null && !this.viewerItem.interactive) {
+      print("[UI] viewer CLOSE (file retreated) " + this.viewerItem.def.name)
       this.viewerItem = null
     }
 
