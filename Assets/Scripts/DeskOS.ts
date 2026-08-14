@@ -99,6 +99,8 @@ export class DeskOS extends BaseScriptComponent {
   private brain: DeskOSBrain = new DeskOSBrain()
   /** One capture at a time — a second pinch mid-flight would race the first. */
   private capturing = false
+  /** Distinguishes concurrent-ish captures; the display name is not stable. */
+  private captureSeq = 0
   /** Captures land in whichever folder is open, else the first one. */
   private captureTarget = "photos"
   private audio: DeskOSAudio | null = null
@@ -269,61 +271,60 @@ export class DeskOS extends BaseScriptComponent {
   /**
    * Look at something, pinch, and have it land filed.
    *
-   * Three stages that fail independently on purpose: the frame is the capture,
-   * the understanding is a nicety, and the upload is durability. Losing the
-   * later ones degrades the result but never discards what the user actually
-   * did — a photo that lands as "Photo 14:32" in the open folder is still a
-   * photo that landed.
+   * Two phases, because understanding takes about five seconds and a desk that
+   * does nothing for five seconds after a pinch reads as broken. The card lands
+   * immediately with the frame already on it; the name and the folder arrive a
+   * beat later. The move to the chosen folder is the part worth watching.
+   *
+   * Each stage fails on its own terms: the frame is the capture, the
+   * understanding is a nicety, the upload is durability. Losing the later ones
+   * degrades the result but never discards what the user actually did.
    */
   private async onCapturePhoto(): Promise<void> {
     if (this.capturing) return
     this.capturing = true
 
     try {
-      this.uiDesk.setStatus("Capturing…")
       const frame = await this.capture.grabFrame()
       if (frame === null) {
         this.uiDesk.setStatus("Camera unavailable")
         return
       }
 
+      const landing = this.currentFolderSlug()
+      this.captureSeq++
+      const token = "capture-" + this.captureSeq
+      const placeholder = "Reading…"
+
+      if (!this.uiDesk.seatCapture(landing, "image", placeholder, "", null, token)) {
+        this.uiDesk.setStatus("No room on the desk")
+        return
+      }
+      this.uiDesk.setFileTexture(placeholder, frame.texture)
+      this.audio?.playCardSelect()
       this.uiDesk.setStatus("Reading it…")
-      const folders = this.uiDesk.folderChoices()
-      const seen = await this.brain.understand(frame.base64, folders)
+
+      const seen = await this.brain.understand(frame.base64, this.uiDesk.folderChoices())
+      const title = seen === null ? "Photo " + this.clock() : seen.title
+      const meta = seen === null ? "JPG" : seen.meta
+      const slug = seen === null ? landing : seen.folderSlug
 
       if (seen === null) {
         print("[DeskOS] No understanding — filing under a timestamp.")
       } else {
         print(
-          "[DeskOS] Understood: '" + seen.title + "' (" + seen.kind + ") -> " +
-            seen.folderSlug + " — " + seen.rationale +
-            (seen.body === null ? "" : " [" + seen.body.length + " lines]")
+          "[DeskOS] Understood: '" + seen.title + "' -> " + seen.folderSlug +
+            " — " + seen.rationale
         )
       }
 
-      const title = seen === null ? "Photo " + this.clock() : seen.title
-      const meta = seen === null ? "JPG" : seen.meta
-      const kind = seen === null ? ("image" as ContentKind) : seen.kind
-      const slug = seen === null ? this.currentFolderSlug() : seen.folderSlug
-      const body = seen === null ? null : seen.body
-
-      if (!this.uiDesk.seatCapture(slug, kind, title, meta, body)) {
-        this.uiDesk.setStatus(this.uiDesk.getFolderTitle(this.titleCase(slug)) + " is full")
-        return
-      }
-
-      // The photo is on the chip before the upload finishes — the user should
-      // see what they captured immediately, not after a round trip.
-      if (kind === "image") {
-        this.textureCache[title] = frame.texture
-        this.uiDesk.setFileTexture(title, frame.texture)
-      }
-
-      this.audio?.playCardSelect()
-      this.uiDesk.setStatus(seen === null ? title + " saved" : title + " — " + seen.rationale)
+      this.uiDesk.finishCapture(token, title, meta, null, slug)
+      this.textureCache[title] = frame.texture
+      this.uiDesk.setFileTexture(title, frame.texture)
+      this.uiDesk.setStatus(seen === null ? title : title + " — " + seen.rationale)
 
       const stored = await this.cloud.uploadCapture(
-        kind,
+        "image" as ContentKind,
         title,
         meta,
         slug,

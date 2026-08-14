@@ -18,6 +18,18 @@ const cameraModule = require("LensStudio:CameraModule") as CameraModule
 /** Voice is speech, not music — 16 kHz keeps the upload small with no audible loss. */
 const VOICE_SAMPLE_RATE = 16000
 
+/**
+ * Requested camera resolution, short side in pixels.
+ *
+ * The system default is far more than anything here needs: the frame becomes a
+ * thumbnail a few cm wide and an inline image for a vision model, neither of
+ * which benefits from full sensor resolution. Encoding that default to JPEG
+ * cost ~5 s per capture, which reads as the Lens hanging. The typings are
+ * explicit about this — "use lowest resolution required for your use case to
+ * save on power and not overheat the device".
+ */
+const CAPTURE_DIMENSION = 720
+
 /** One frozen frame, encoded once and usable by both consumers. */
 export interface CapturedFrame {
   /** For Gemini, which takes image bytes inline as base64. */
@@ -59,6 +71,7 @@ export class DeskOSCapture {
     try {
       const request = CameraModule.createCameraRequest()
       request.cameraId = CameraModule.CameraId.Default_Color
+      request.imageSmallerDimension = CAPTURE_DIMENSION
       this.cameraTexture = cameraModule.requestCamera(request)
       const provider = this.cameraTexture.control as CameraTextureProvider
       // Counting frames rather than trusting the request: a stream that was
@@ -103,11 +116,22 @@ export class DeskOSCapture {
       return null
     }
 
+    const started = new Date().getTime()
     const frozen = (this.cameraTexture as Texture).copyFrame()
     const base64 = await this.encodeJpeg(frozen)
     if (base64 === null) return null
 
-    return {base64, bytes: Base64.decode(base64), texture: frozen}
+    const bytes = Base64.decode(base64)
+    // Measured, not assumed: this is the step that decides whether a pinch
+    // feels instant or looks like a freeze.
+    print(
+      "[DeskOSCapture] Frame encoded in " +
+        (new Date().getTime() - started) +
+        " ms (" +
+        Math.round(bytes.length / 1024) +
+        " KB)."
+    )
+    return {base64, bytes, texture: frozen}
   }
 
   /**
@@ -125,7 +149,7 @@ export class DeskOSCapture {
           print("[DeskOSCapture] JPEG encode failed.")
           resolve(null)
         },
-        CompressionQuality.HighQuality,
+        CompressionQuality.IntermediateQuality,
         EncodingType.Jpg
       )
     })

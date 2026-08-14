@@ -1,6 +1,5 @@
 import {Gemini} from "RemoteServiceGateway.lspkg/HostedExternal/Gemini"
 import {GeminiTypes} from "RemoteServiceGateway.lspkg/HostedExternal/GoogleGenAITypes"
-import {ContentKind} from "./DeskOSTypes"
 import {withTimeout} from "./DeskOSAsync"
 
 /**
@@ -36,18 +35,9 @@ export interface FolderChoice {
 export interface Understanding {
   title: string
   meta: string
-  /**
-   * Capture yields `text` or `image` only — a still frame cannot become a video
-   * or a voice note. A photographed whiteboard is `text`: the interesting part
-   * is what it *says*, so it becomes a readable document rather than a picture
-   * of one.
-   */
-  kind: ContentKind
   folderSlug: string
   /** One short clause, shown under the card while it flies to its folder. */
   rationale: string
-  /** Transcribed lines when kind is `text`; null for a plain photo. */
-  body: string[] | null
 }
 
 /**
@@ -66,13 +56,6 @@ const UNDERSTANDING_SCHEMA = {
       type: "STRING",
       description: "At most four words of detail, e.g. 'Handwritten note' or '3 action items'."
     },
-    kind: {
-      type: "STRING",
-      enum: ["text", "image"],
-      description:
-        "'text' when readable writing is the point (whiteboard, page, screen, receipt, sign). " +
-        "'image' when the subject is a thing, place or person."
-    },
     folderSlug: {
       type: "STRING",
       description: "Slug of the best-fitting existing folder. Must be one of the offered slugs."
@@ -82,16 +65,9 @@ const UNDERSTANDING_SCHEMA = {
       description:
         "One clause, under ten words, addressed to the user, explaining the folder choice. " +
         "No leading capital, no full stop. Example: 'matches your other sprint notes'."
-    },
-    body: {
-      type: "ARRAY",
-      items: {type: "STRING"},
-      description:
-        "Only when kind is 'text': the readable content, one entry per line, in reading order. " +
-        "Transcribe what is actually written. Omit entirely for images."
     }
   },
-  required: ["title", "meta", "kind", "folderSlug", "rationale"]
+  required: ["title", "meta", "folderSlug", "rationale"]
 }
 
 export class DeskOSBrain {
@@ -161,8 +137,9 @@ export class DeskOSBrain {
     return (
       "You are the filing sense of a spatial desktop worn on AR glasses. The user " +
       "glances at something in the room and pinches; you receive that camera frame.\n\n" +
-      "Decide three things: what to call it, whether it is worth reading or worth " +
-      "looking at, and which folder it belongs in.\n\n" +
+      "Decide two things: what to call it, and which folder it belongs in. Read " +
+      "any writing in the frame — a whiteboard of sprint planning should be named " +
+      "for what it says, not for being a whiteboard.\n\n" +
       "The folders that exist:\n" +
       lines.join("\n") +
       "\n\nFile by what the thing is about, not by matching words to folder names. " +
@@ -191,8 +168,6 @@ export class DeskOSBrain {
       return null
     }
 
-    const kind: ContentKind = parsed.kind === "text" ? "text" : "image"
-
     // Never trust the slug. A hallucinated folder would file the card into a
     // folder that does not exist, and the card would simply vanish.
     let slug = String(parsed.folderSlug === undefined ? "" : parsed.folderSlug)
@@ -205,22 +180,11 @@ export class DeskOSBrain {
       slug = folders[0].slug
     }
 
-    // Documents get their transcription; photos never do, even if the model
-    // volunteered one — a picture card with a body renders as neither.
-    let body: string[] | null = null
-    if (kind === "text" && Array.isArray(parsed.body)) {
-      body = []
-      for (const line of parsed.body) body.push(String(line))
-      if (body.length === 0) body = null
-    }
-
     return {
       title: this.text(parsed.title, "Untitled"),
-      meta: this.text(parsed.meta, kind === "text" ? "Note" : "Photo"),
-      kind,
+      meta: this.text(parsed.meta, "Photo"),
       folderSlug: slug,
-      rationale: this.text(parsed.rationale, "filed here for now"),
-      body
+      rationale: this.text(parsed.rationale, "filed here for now")
     }
   }
 

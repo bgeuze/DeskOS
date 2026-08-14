@@ -546,6 +546,12 @@ interface ContentHandles {
   offsetY: number
   /** Rate-limited emergence progress, so an ownership change animates. */
   p: number
+  /**
+   * Non-empty while a capture is still being understood. Identity has to
+   * survive the rename that lands when the model answers, so it cannot be the
+   * display name.
+   */
+  captureToken: string
   tether: RoundedRectangle
   tetherObj: SceneObject
   /** Re-skinnable pieces — rewritten when cloud content arrives. */
@@ -1093,7 +1099,8 @@ export class DeskOSUI extends BaseScriptComponent {
     kind: ContentKind,
     name: string,
     meta: string,
-    body: string[] | null
+    body: string[] | null,
+    token: string
   ): boolean {
     const card = this.cardById(this.titleCaseSlug(folderSlug))
     if (card === null) return false
@@ -1108,6 +1115,7 @@ export class DeskOSUI extends BaseScriptComponent {
     }
     if (seat === null) return false
 
+    seat.captureToken = token
     seat.def.name = name
     seat.def.meta = meta
     seat.def.body = body === null ? undefined : body
@@ -1137,6 +1145,62 @@ export class DeskOSUI extends BaseScriptComponent {
     // Open the folder it landed in, so the arrival is something the user
     // watches rather than something that happened behind a closed lid.
     this.setSelected(card.def.id)
+    return true
+  }
+
+  /**
+   * Fill in a capture once the model has answered.
+   *
+   * Capture is deliberately two-phase. Understanding takes about five seconds,
+   * and a desk that does nothing for five seconds after a pinch reads as
+   * broken — so the card lands immediately under a placeholder and is renamed
+   * here. If the model picked a different folder than the one it landed in,
+   * the card moves, which is the moment worth watching rather than a card
+   * that simply appears already-filed.
+   */
+  finishCapture(
+    token: string,
+    title: string,
+    meta: string,
+    body: string[] | null,
+    targetSlug: string
+  ): boolean {
+    let found: ContentHandles | null = null
+    let from: CardHandles | null = null
+    for (const card of this.cards) {
+      for (const chip of card.contents) {
+        if (chip.captureToken !== token) continue
+        found = chip
+        from = card
+      }
+    }
+    if (found === null || from === null) return false
+
+    found.captureToken = ""
+    found.def.name = title
+    found.def.meta = meta
+    found.def.body = body === null ? undefined : body
+    found.nameText.text = title
+    found.nameText.layoutRect = this.captionRect(title)
+
+    const claimant = this.cardById(this.titleCaseSlug(targetSlug))
+    if (claimant === null || claimant === from) return true
+
+    // Same hand-off the release path uses, for the same reason: both folders'
+    // clocks are sized from their file count and have to be re-derived, or the
+    // gaining folder never runs far enough for the file to finish emerging.
+    const idx = from.contents.indexOf(found)
+    if (idx >= 0) from.contents.splice(idx, 1)
+    claimant.contents.push(found)
+    found.ownerId = claimant.def.id
+    found.pinned = false
+    found.grouped = true
+    found.p = 0
+    this.reflowRing(from)
+    this.reflowRing(claimant)
+    this.refreshOpenDuration(from)
+    this.refreshOpenDuration(claimant)
+    this.setSelected(claimant.def.id)
     return true
   }
 
@@ -1511,7 +1575,8 @@ export class DeskOSUI extends BaseScriptComponent {
         settleFromY: 0,
         settleToX: 0,
         settleToY: 0,
-        snapPending: false
+        snapPending: false,
+        captureToken: ""
       }
       card.contents.push(item)
       this.bindContent(item, btn, manipOut[0])
