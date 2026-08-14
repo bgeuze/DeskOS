@@ -18,6 +18,12 @@ const supabaseProject = requireAsset(
   "../SupabaseProject_DeskOS.supabaseProject"
 ) as SupabaseProject
 
+/** Singleton, not an @input, so this module stays self-contained. */
+const internetModule = require("LensStudio:InternetModule") as InternetModule
+
+/** A reachable backend answers well inside this; an unreachable one never does. */
+const PROBE_TIMEOUT_S = 4.0
+
 /** One file as stored in `desk_files`. */
 export interface CloudFile {
   id: string
@@ -89,20 +95,21 @@ export class DeskOSCloud {
    * for any reason — the caller treats that as "use sample content".
    */
   async load(): Promise<CloudDesk | null> {
-    // Lens Studio preview cannot reach Snap Cloud at all: the runtime logs
-    // "HttpsOpenService for Wearable platform only" and the blocking client
-    // call stalls the JS context until it is killed with a TimeoutError, which
-    // takes the whole Lens down. Networking is device-only, so preview runs on
-    // sample content by design rather than by accident.
-    if (global.deviceInfoSystem.isEditor()) {
-      print("[DeskOSCloud] Preview has no network (wearable-only) — sample content.")
-      return null
-    }
-
     if (!this.isConfigured()) {
       print("[DeskOSCloud] No credentials imported — using sample content.")
       return null
     }
+
+    // Preview is NOT categorically offline. Networking there is gated on the
+    // Preview panel's Device Type Override being set to Specs — blocking on
+    // isEditor() turned a configuration problem into an apparent platform limit
+    // and swallowed the real error along with it.
+    //
+    // The hazard that guard protected against is real though: engaging the
+    // Supabase client with no route stalls the JS context until a TimeoutError
+    // takes the whole Lens down. So ask the cheap question first, and only
+    // commit to the heavy client once something has actually answered.
+    if (!(await this.probeNetwork())) return null
 
     try {
       this.client = createClient(supabaseProject.url, supabaseProject.publicToken, {
@@ -453,6 +460,72 @@ export class DeskOSCloud {
 
   dispose(): void {
     this.client?.removeAllChannels()
+  }
+
+  /**
+   * Cheap reachability check, run before the Supabase client is ever touched.
+   *
+   * Two stages, cheapest first: ask the platform whether it has a route at all
+   * (synchronous, free), then make one small real request to prove it. The
+   * timeout is the point — a fetch over a blocked transport can hang rather
+   * than reject, and an un-raced await on that is what took the Lens down.
+   */
+  private async probeNetwork(): Promise<boolean> {
+    if (!global.deviceInfoSystem.isInternetAvailable()) {
+      print(
+        "[DeskOSCloud] No internet route. In Lens Studio preview this is " +
+          "almost always the Preview panel's Device Type Override — set it to Specs."
+      )
+      return false
+    }
+
+    try {
+      const response = await this.withTimeout(
+        internetModule.fetch(supabaseProject.url + "/auth/v1/health", {method: "GET"}),
+        PROBE_TIMEOUT_S
+      )
+      if (response === null) {
+        print("[DeskOSCloud] Backend silent for " + PROBE_TIMEOUT_S + "s — treating as offline.")
+        return false
+      }
+      print("[DeskOSCloud] Backend reachable (HTTP " + response.status + ").")
+      return true
+    } catch (e) {
+      // The valuable case: the message names the actual refusal, e.g.
+      // "HttpsOpenService for Wearable platform only".
+      print("[DeskOSCloud] Backend unreachable: " + e)
+      return false
+    }
+  }
+
+  /**
+   * Resolve null on timeout, but let genuine failures reject — the rejection
+   * carries the message that says *why*, which is the whole diagnostic value.
+   */
+  private withTimeout<T>(work: Promise<T>, seconds: number): Promise<T | null> {
+    return new Promise((resolve, reject) => {
+      let settled = false
+      const timer = setTimeout(() => {
+        if (settled) return
+        settled = true
+        resolve(null)
+      }, seconds * 1000)
+
+      work.then(
+        (value) => {
+          if (settled) return
+          settled = true
+          clearTimeout(timer)
+          resolve(value)
+        },
+        (error) => {
+          if (settled) return
+          settled = true
+          clearTimeout(timer)
+          reject(error)
+        }
+      )
+    })
   }
 
   private wait(seconds: number): Promise<void> {
