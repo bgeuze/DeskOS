@@ -607,6 +607,8 @@ export class DeskOSUI extends BaseScriptComponent {
    * recoverable instead of permanent.
    */
   private allContents: ContentHandles[] = []
+  /** Distinct update failures already reported — the log must not fill up. */
+  private reportedFaults: string[] = []
   private frameId = 0
 
   // The desk is hidden until the user places it. It must NOT be disabled during
@@ -699,7 +701,22 @@ export class DeskOSUI extends BaseScriptComponent {
     // LateUpdate, not Update: InteractableManipulation writes the card's world
     // transform during Update, so the constraint has to run after it or a
     // dragged card visibly leaves the mat for a frame.
-    this.createEvent("LateUpdateEvent").bind(() => this.updateFolders())
+    // Guarded, because this one handler drives every animation on the desk.
+    // An exception here stops the desk dead while buttons keep firing, which
+    // presents as "nothing closes" rather than as a crash — and costs a long
+    // time to trace back to a single bad frame. Report once per distinct
+    // failure and keep the frames coming.
+    this.createEvent("LateUpdateEvent").bind(() => {
+      try {
+        this.updateFolders()
+      } catch (e) {
+        const message = String(e)
+        if (this.reportedFaults.indexOf(message) < 0) {
+          this.reportedFaults.push(message)
+          print("[UI] updateFolders faulted: " + message)
+        }
+      }
+    })
   }
 
   // ── Public API — the main script pushes state in through these ─────────────
@@ -1539,6 +1556,17 @@ export class DeskOSUI extends BaseScriptComponent {
     return c
   }
 
+  /**
+   * Silence the viewer's player, but only while it can legally be touched.
+   *
+   * AudioComponent throws if it is stopped while its object is disabled, and
+   * this runs from paths that reach it in both states.
+   */
+  private silenceViewer(v: ViewerHandles): void {
+    if (v.root.enabled && v.hasTrack) v.audio.stop(false)
+    v.hasTrack = false
+  }
+
   /** Progress bar width, anchored left so it grows rather than centres. */
   private setProgress(fill: RoundedRectangle, fraction: number): void {
     const track = VIEWER_W - 9
@@ -1610,8 +1638,7 @@ export class DeskOSUI extends BaseScriptComponent {
     v.imageSwatch.opacity = 0.45
     v.imageIcon.enabled = true
 
-    v.audio.stop(false)
-    v.hasTrack = false
+    this.silenceViewer(v)
     v.playLabel.text = "Play"
     v.elapsed.text = "0:00"
     this.setProgress(v.progressFill, 0)
@@ -1633,12 +1660,13 @@ export class DeskOSUI extends BaseScriptComponent {
 
     if (this.viewerT < 0.006 && target === 0) {
       if (v.root.enabled) {
-        print("[UI] viewer panel disabled")
+        // Stop BEFORE disabling. The AudioComponent lives on this very root,
+        // and calling stop() on a disabled component throws — from inside the
+        // LateUpdate handler that drives every animation on the desk. The desk
+        // then freezes while buttons keep firing, which reads as "the folder
+        // will not close" rather than as a crash.
+        this.silenceViewer(v)
         v.root.enabled = false
-        // A closed viewer that is still audible is a bug the user hears
-        // before they see it.
-        v.audio.stop(false)
-        v.hasTrack = false
       }
       return
     }
