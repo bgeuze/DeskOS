@@ -291,12 +291,6 @@ const KIND_LABEL: Record<ContentKind, string> = {
 
 // ── Hover preview + spatial viewer ───────────────────────────────────────────
 
-const PREVIEW_W = 12.0
-const PREVIEW_H = 5.4
-const PREVIEW_SPEED = 14.0
-/** How far in front of the hovered chip (toward the user) the preview sits (cm). */
-const PREVIEW_GAP = 4.2
-
 const VIEWER_W = 32
 const VIEWER_H = 20
 /** Height of the standing viewer's centre above the mat (cm). */
@@ -309,13 +303,6 @@ const VIEWER_START_SCALE = 0.22
 const VIEWER_SPEED = 7.0
 const VIEWER_MAX_X = 12
 const VIEWER_TEXT_LINES = 7
-
-interface PreviewHandles {
-  root: SceneObject
-  accent: RoundedRectangle
-  name: Text
-  meta: Text
-}
 
 interface ViewerHandles {
   root: SceneObject
@@ -624,9 +611,6 @@ export class DeskOSUI extends BaseScriptComponent {
 
   private _onFolderSelected = new Event<string>()
   private _onFolderHoverEnter = new Event<string>()
-  private preview: PreviewHandles | null = null
-  private previewAmount = 0
-  private hoveredItem: ContentHandles | null = null
 
   private viewer: ViewerHandles | null = null
   private viewerItem: ContentHandles | null = null
@@ -945,32 +929,10 @@ export class DeskOSUI extends BaseScriptComponent {
     }
 
     // Last of all, so the preview and viewer paint above every chip.
-    this.buildPreview(folders)
     this.buildViewer(folders)
   }
 
   // ── Hover preview ─────────────────────────────────────────────────────────
-
-  private buildPreview(parent: SceneObject): void {
-    const root = this.obj(parent, "FilePreview")
-    const body = root.createComponent(RoundedRectangle.getTypeName()) as RoundedRectangle
-    body.size = new vec2(PREVIEW_W, PREVIEW_H)
-    body.cornerRadius = CONTENT_CORNER
-    body.backgroundColor = CONTENT_BODY
-
-    // Left edge bar, recoloured per kind — the preview inherits the file's identity.
-    const barObj = this.obj(root, "Accent", new vec3(-PREVIEW_W / 2 + 0.7, 0, 0.06))
-    const accent = barObj.createComponent(RoundedRectangle.getTypeName()) as RoundedRectangle
-    accent.size = new vec2(0.5, PREVIEW_H - 1.4)
-    accent.cornerRadius = 0.25
-    accent.backgroundColor = KIND_ACCENT.image
-
-    const name = this.freeText(root, "Name", new vec3(0.5, 1.0, 0.08), "Headline2", COLOR_PRIMARY, PREVIEW_W - 2.6)
-    const meta = this.freeText(root, "Meta", new vec3(0.5, -1.1, 0.08), "Caption", COLOR_SECONDARY, PREVIEW_W - 2.6)
-
-    root.enabled = false
-    this.preview = {root, accent, name, meta}
-  }
 
   /** A Text positioned by hand rather than by a layout. */
   private freeText(
@@ -993,33 +955,6 @@ export class DeskOSUI extends BaseScriptComponent {
     t.verticalOverflow = VerticalOverflow.Overflow
     t.layoutRect = Rect.create(-widthCM / 2, widthCM / 2, -1.0, 1.0)
     return t
-  }
-
-  private updatePreview(dt: number): void {
-    const p = this.preview
-    if (p === null) return
-
-    const item = this.hoveredItem
-    const target = item !== null ? 1 : 0
-    this.previewAmount += (target - this.previewAmount) * Math.min(1, dt * PREVIEW_SPEED)
-
-    if (this.previewAmount < 0.01 && target === 0) {
-      if (p.root.enabled) p.root.enabled = false
-      return
-    }
-    if (!p.root.enabled) p.root.enabled = true
-
-    if (item !== null) {
-      // Sits in FRONT of the chip (toward the user) so it never covers the thing
-      // being described.
-      const chip = item.root.getTransform().getLocalPosition()
-      const gap = KIND_SIZE[item.def.kind].y / 2 + PREVIEW_H / 2 + PREVIEW_GAP
-      p.root
-        .getTransform()
-        .setLocalPosition(new vec3(chip.x, chip.y - gap, CONTENT_LIFT + 1.4))
-    }
-    const e = easeOutCubic(clamp01(this.previewAmount))
-    p.root.getTransform().setLocalScale(new vec3(e, e, 1))
   }
 
   // ── Cloud content ─────────────────────────────────────────────────────────
@@ -2130,7 +2065,6 @@ export class DeskOSUI extends BaseScriptComponent {
   private updateFolders(): void {
     this.frameId++
     const dt = getDeltaTime()
-    this.hoveredItem = null
     this.resolvePendingSnaps()
     const adoptId = this.adoptCandidate()
     const kLift = Math.min(1, dt * CARD_LIFT_SPEED)
@@ -2209,7 +2143,6 @@ export class DeskOSUI extends BaseScriptComponent {
       this.viewerItem = null
     }
 
-    this.updatePreview(dt)
     this.updateViewer(dt)
   }
 
@@ -2568,7 +2501,6 @@ export class DeskOSUI extends BaseScriptComponent {
       item.interactive = p >= 1
       if (!item.interactive) item.hovered = false
 
-      if (item.hovered) this.hoveredItem = item
 
       const hoverK = Math.min(1, dt * CONTENT_HOVER_SPEED)
       item.hoverAmount += ((item.hovered ? 1 : 0) - item.hoverAmount) * hoverK
