@@ -246,7 +246,9 @@ const CONTENTS: Record<string, ContentDef[]> = {
     // Reserves — built empty and parked so captures have somewhere to land.
     {kind: "image", name: "", meta: "", reserve: true},
     {kind: "image", name: "", meta: "", reserve: true},
-    {kind: "text", name: "", meta: "", reserve: true}
+    {kind: "text", name: "", meta: "", reserve: true},
+    {kind: "audio", name: "", meta: "", reserve: true},
+    {kind: "audio", name: "", meta: "", reserve: true}
   ],
   Photos: [
     {kind: "image", name: "Sunset", meta: "JPG · 3.8 MB"},
@@ -256,7 +258,9 @@ const CONTENTS: Record<string, ContentDef[]> = {
     // Reserves — built empty and parked so captures have somewhere to land.
     {kind: "image", name: "", meta: "", reserve: true},
     {kind: "image", name: "", meta: "", reserve: true},
-    {kind: "text", name: "", meta: "", reserve: true}
+    {kind: "text", name: "", meta: "", reserve: true},
+    {kind: "audio", name: "", meta: "", reserve: true},
+    {kind: "audio", name: "", meta: "", reserve: true}
   ],
   Personal: [
     {
@@ -278,7 +282,9 @@ const CONTENTS: Record<string, ContentDef[]> = {
     // Reserves — built empty and parked so captures have somewhere to land.
     {kind: "image", name: "", meta: "", reserve: true},
     {kind: "image", name: "", meta: "", reserve: true},
-    {kind: "text", name: "", meta: "", reserve: true}
+    {kind: "text", name: "", meta: "", reserve: true},
+    {kind: "audio", name: "", meta: "", reserve: true},
+    {kind: "audio", name: "", meta: "", reserve: true}
   ]
 }
 

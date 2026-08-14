@@ -165,10 +165,10 @@ export class DeskOSCapture {
    * clearly when it is missing rather than half-working.
    */
   startRecording(micTrack: AudioTrackAsset | null): boolean {
-    if (global.deviceInfoSystem.isEditor()) {
-      print("[DeskOSCapture] Microphone is device-only — cannot record in preview.")
-      return false
-    }
+    // No isEditor() short-circuit. That guard was written on the assumption
+    // that preview cannot reach the hardware — the same assumption that turned
+    // out to be wrong for networking and for the camera. Attempt it and let the
+    // platform refuse, so the log carries a real reason instead of ours.
     if (micTrack === null) {
       print("[DeskOSCapture] No microphone audio track wired — cannot record.")
       return false
@@ -198,16 +198,26 @@ export class DeskOSCapture {
     this.sampleCount += shape.x
   }
 
-  /** Stop, encode to WAV, upload, and register the row. */
-  async stopRecording(folderSlug: string): Promise<string | null> {
+  /**
+   * Stop, encode to WAV, upload, and register the row.
+   *
+   * Returns the display name and duration together: the caller needs both to
+   * put the memo on the desk, and recomputing the duration there would mean
+   * knowing the sample rate the provider actually used.
+   */
+  async stopRecording(folderSlug: string): Promise<{name: string; meta: string} | null> {
     const mic = this.micControl
     if (!this.recording || mic === null) return null
 
     this.recording = false
     mic.stop()
 
+    print(
+      "[DeskOSCapture] Captured " + this.sampleCount + " samples in " +
+        this.frames.length + " frames at " + mic.sampleRate + " Hz."
+    )
     if (this.sampleCount === 0) {
-      print("[DeskOSCapture] Nothing recorded.")
+      print("[DeskOSCapture] Nothing recorded — microphone delivered no frames.")
       return null
     }
 
@@ -219,16 +229,17 @@ export class DeskOSCapture {
 
     const seconds = this.sampleCount / rate
     const name = "Memo " + this.stamp()
+    const meta = this.duration(seconds)
     const file = await this.cloud.uploadCapture(
       "audio" as ContentKind,
       name,
-      this.duration(seconds),
+      meta,
       folderSlug,
       wav,
       "audio/wav",
       "wav"
     )
-    return file === null ? null : name
+    return file === null ? null : {name, meta}
   }
 
   /** 16-bit PCM mono with a RIFF header — the smallest thing every player accepts. */

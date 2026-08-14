@@ -354,9 +354,24 @@ export class DeskOS extends BaseScriptComponent {
   private async onToggleRecord(): Promise<void> {
     if (this.capture.isRecording()) {
       this.uiDesk.setStatus("Saving memo…")
-      const name = await this.capture.stopRecording(this.currentFolderSlug())
-      this.uiDesk.setStatus(name === null ? "Memo failed" : name + " saved")
-      if (name !== null) this.audio?.playCardSelect()
+      const folder = this.currentFolderSlug()
+      const result = await this.capture.stopRecording(folder)
+      if (result === null) {
+        this.uiDesk.setStatus("Memo failed")
+        return
+      }
+
+      // Upload alone left the memo invisible until the next launch. A recording
+      // you cannot see is indistinguishable from one that did not happen.
+      this.captureSeq++
+      const token = "memo-" + this.captureSeq
+      if (this.uiDesk.seatCapture(folder, "audio", result.name, result.meta, null, token)) {
+        this.uiDesk.finishCapture(token, result.name, result.meta, null, folder)
+      } else {
+        print("[DeskOS] " + result.name + " is stored but the desk has no room for it.")
+      }
+      this.audio?.playCardSelect()
+      this.uiDesk.setStatus(result.name + " saved")
       return
     }
     const track = this.micAudioTrack === undefined ? null : this.micAudioTrack

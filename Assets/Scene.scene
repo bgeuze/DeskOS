@@ -1346,7 +1346,6 @@
   ScriptAsset: !<reference> 626c12b5-7f79-4e91-9ed4-dd88106494a4
   ScriptInputsDefault:
     debugColliders: true
-    micAudioTrack: true
   ScriptTypesDefault:
     {}
   ScriptInputs:
@@ -1355,7 +1354,7 @@
       uiDesk: !<MappingBased.AssignableType_1> ab9530c9-bf36-4e35-862a-c781d908d3ca
       uiHint: !<MappingBased.AssignableType_2> a5434ee1-a50e-45a0-8f8a-635bb35bfef6
       reticle: !<MappingBased.AssignableType_3> 5d90654c-cbd3-4f8b-9025-d7ec150b71f8
-      micAudioTrack: !<reference.AudioTrackAsset> 00000000-0000-0000-0000-000000000000
+      micAudioTrack: !<reference.AudioTrackAsset> 87c6a30d-46b3-4939-8d46-3aa20667f2c2
   ScriptTypes:
     "":
       {}
