@@ -1,0 +1,57 @@
+- !<AssetImportMetadata/79ed77ed-b1e2-4278-8fe6-fbf834ba16bc>
+  ImportedAssetIds:
+    TypeScriptAsset: !<reference> 626c12b5-7f79-4e91-9ed4-dd88106494a4
+  ImporterName: TypeScriptAssetImporter
+  PrimaryAsset: !<reference> 626c12b5-7f79-4e91-9ed4-dd88106494a4
+  PackageType: NotAPackage
+  LegacyPackagePolicy: ~
+  ExtraData:
+    {}
+  AssetDataMap:
+    TypeScriptAsset: !<own> c5e0993d-7a94-4f16-b22d-4abad5eb9eab
+  DependentFiles:
+    []
+  ImporterSettings: !<AssetImporterSettings>
+    {}
+  CompressionSettings: !<own> 00000000-0000-0000-0000-000000000000
+- !<TypeScriptAssetData/c5e0993d-7a94-4f16-b22d-4abad5eb9eab>
+  SvgIcon: ""
+  SetupScript:
+    code: ""
+  Description: ""
+  VersionMajor: 0
+  VersionMinor: 0
+  VersionPatch: 0
+  VersionPrerelease: ""
+  ComponentUid: e5b06e53-cca0-41b0-9264-d20965189d1d
+  ExportUid: 00000000-0000-0000-0000-000000000000
+  PackagePolicy: CanBeUnpacked
+  ScriptInputsHidden:
+    debugColliders: false
+    micAudioTrack: false
+    reticle: false
+    uiDesk: false
+    uiHint: false
+  ScriptTypesHidden:
+    {}
+  ReadMe: !<reference> 00000000-0000-0000-0000-000000000000
+  DeclarationFile: !<reference> 00000000-0000-0000-0000-000000000000
+  Tags:
+    []
+  Attachments:
+    []
+  DefaultScriptInputs:
+    - debugColliders: false
+      uiDesk: !<MappingBased.AssignableType_1> 00000000-0000-0000-0000-000000000000
+      uiHint: !<MappingBased.AssignableType_2> 00000000-0000-0000-0000-000000000000
+      reticle: !<MappingBased.AssignableType_3> 00000000-0000-0000-0000-000000000000
+      micAudioTrack: !<reference.AudioTrackAsset> 00000000-0000-0000-0000-000000000000
+  ScriptTypes:
+    -
+      {}
+  InputLines:
+    - // @input bool debugColliders
+    - // @input AssignableType_1 uiDesk
+    - // @input AssignableType_2 uiHint
+    - // @input AssignableType_3 reticle
+    - // @input Asset.AudioTrackAsset micAudioTrack

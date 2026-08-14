@@ -1,0 +1,57 @@
+- !<AssetImportMetadata/eeddde9f-ea8c-46be-b745-b86881265275>
+  ImportedAssetIds:
+    TypeScriptAsset: !<reference> 03fc185a-0ee5-4345-8744-58663d5741f0
+  ImporterName: TypeScriptAssetImporter
+  PrimaryAsset: !<reference> 03fc185a-0ee5-4345-8744-58663d5741f0
+  PackageType: NotAPackage
+  LegacyPackagePolicy: ~
+  ExtraData:
+    {}
+  AssetDataMap:
+    TypeScriptAsset: !<own> 4a8c58f8-e7d6-4772-8892-abfc6db98694
+  DependentFiles:
+    []
+  ImporterSettings: !<AssetImporterSettings>
+    {}
+  CompressionSettings: !<own> 00000000-0000-0000-0000-000000000000
+- !<TypeScriptAssetData/4a8c58f8-e7d6-4772-8892-abfc6db98694>
+  SvgIcon: ""
+  SetupScript:
+    code: ""
+  Description: ""
+  VersionMajor: 0
+  VersionMinor: 0
+  VersionPatch: 0
+  VersionPrerelease: ""
+  ComponentUid: 7dbd2ba2-4690-4378-9038-9e4a1889101b
+  ExportUid: 00000000-0000-0000-0000-000000000000
+  PackagePolicy: CanBeUnpacked
+  ScriptInputsHidden:
+    animate: false
+    cardinalEvery: false
+    material: false
+    outerRadius: false
+    tickCount: false
+  ScriptTypesHidden:
+    {}
+  ReadMe: !<reference> 00000000-0000-0000-0000-000000000000
+  DeclarationFile: !<reference> 00000000-0000-0000-0000-000000000000
+  Tags:
+    []
+  Attachments:
+    []
+  DefaultScriptInputs:
+    - material: !<reference.Material> 00000000-0000-0000-0000-000000000000
+      outerRadius: !<float> 8.000000
+      animate: true
+      tickCount: 12
+      cardinalEvery: 3
+  ScriptTypes:
+    -
+      {}
+  InputLines:
+    - '// @input Asset.Material material {"hint":"Vertex colour material (vertexBaseColorMaterial from the SimpleVertexBaseColor package)."}'
+    - '// @input float outerRadius = 8 {"hint":"Outer radius in cm. 8 cm = 16 cm across."}'
+    - '// @input bool animate = true {"hint":"Animate tick spin, breathing and the lock pulse. Turn off to save frame time."}'
+    - '// @input int tickCount = 12 {"hint":"Number of radial tick marks around the ring."}'
+    - '// @input int cardinalEvery = 3 {"hint":"Every Nth tick is drawn longer as a cardinal mark."}'

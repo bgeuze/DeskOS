@@ -1,0 +1,29 @@
+# BEGIN Lens Studio managed Agents-Docs block
+.mcp.json
+.cursor/mcp.json
+.vscode/mcp.json
+.codex/config.toml
+.claude/settings.local.json
+# END Lens Studio managed Agents-Docs block
+
+# ── DeskOS (handmatig, buiten het Lens Studio managed block) ───────────────
+
+# Secrets — nooit committen
+spk_debug_key.pem
+Assets/*.supabaseProject
+Assets/*.supabaseProject.meta
+supabase/.temp/
+.env
+.env.*
+
+# Door Lens Studio gegenereerd / lokaal
+Cache/
+Support/
+Workspaces/
+PluginsUserPreferences/
+tempAssetGen/
+.virtual-scene.json
+*.esproj.*.lock
+
+# macOS
+.DS_Store
