@@ -564,6 +564,8 @@ interface ContentHandles {
    * display name.
    */
   captureToken: string
+  /** Frame this chip was last driven on — see the orphan sweep in updateFolders. */
+  seenFrame: number
   tether: RoundedRectangle
   tetherObj: SceneObject
   /** Re-skinnable pieces — rewritten when cloud content arrives. */
@@ -596,6 +598,16 @@ export class DeskOSUI extends BaseScriptComponent {
   private recordButton: Button | null = null
   private cards: CardHandles[] = []
   private selectedId: string | null = null
+  /**
+   * Every chip ever built, independent of which folder currently owns it.
+   *
+   * Adoption moves chips between folders' content lists, and a chip that fell
+   * out of every list would simply stop being driven — frozen mid-air, visible
+   * forever, with no folder able to retract it. This registry makes that
+   * recoverable instead of permanent.
+   */
+  private allContents: ContentHandles[] = []
+  private frameId = 0
 
   // The desk is hidden until the user places it. It must NOT be disabled during
   // onAwake: UIKit `Element` binds initialize() to OnStartEvent, and a SceneObject
@@ -1715,9 +1727,11 @@ export class DeskOSUI extends BaseScriptComponent {
         settleToX: 0,
         settleToY: 0,
         snapPending: false,
-        captureToken: ""
+        captureToken: "",
+        seenFrame: -1
       }
       card.contents.push(item)
+      this.allContents.push(item)
       this.bindContent(item, btn, manipOut[0])
 
       if (def.reserve === true) {
@@ -1867,7 +1881,11 @@ export class DeskOSUI extends BaseScriptComponent {
       })
       manip.onManipulationEnd.add(() => {
         item.grabbed = false
-        item.snapPending = true
+        // Only a real reposition gets tidied and re-filed. SIK reports a plain
+        // tap as a manipulation too, so leaving this unconditional meant every
+        // tap ran the adopt path and could hand the file to whichever folder
+        // happened to be nearest — instead of opening it.
+        item.snapPending = item.dragged
       })
 
       btn.onHoverEnter.add(() => {
@@ -2053,13 +2071,16 @@ export class DeskOSUI extends BaseScriptComponent {
     })
     manip.onManipulationEnd.add(() => {
       handles.grabbed = false
-      handles.snapPending = true
-      this._onFolderReleased.invoke(def.id)
+      // Same rule as files: tapping a folder to open it must not also re-tidy
+      // the desk around it.
+      handles.snapPending = handles.dragged
+      if (handles.dragged) this._onFolderReleased.invoke(def.id)
     })
 
     // Select only on a pinch that never became a drag — otherwise every
     // reposition would also toggle selection.
     btn.onTriggerUp.add(() => {
+      print("[UI] triggerUp " + def.id + " dragged=" + handles.dragged + " isOn=" + btn.isOn)
       if (!handles.dragged) this._onFolderSelected.invoke(def.id)
     })
   }
@@ -2074,6 +2095,7 @@ export class DeskOSUI extends BaseScriptComponent {
    * physical surface no matter how it was moved.
    */
   private updateFolders(): void {
+    this.frameId++
     const dt = getDeltaTime()
     this.hoveredItem = null
     this.resolvePendingSnaps()
@@ -2132,6 +2154,19 @@ export class DeskOSUI extends BaseScriptComponent {
       card.glow.opacity = t
 
       this.updateOpenState(card, dt, x, y)
+    }
+
+    // Anything no folder claimed this frame has fallen out of the ownership
+    // lists. It cannot retract on its own, so retire it here rather than leave
+    // it hanging over the desk.
+    for (const item of this.allContents) {
+      if (item.seenFrame === this.frameId) continue
+      print("[UI] orphaned chip retired: " + item.def.name)
+      item.p = 0
+      item.grabbed = false
+      item.snapPending = false
+      if (item.root.enabled) item.root.enabled = false
+      if (item.tetherObj.enabled) item.tetherObj.enabled = false
     }
 
     // A viewer whose file has retreated into a closing folder has nothing left
@@ -2376,6 +2411,7 @@ export class DeskOSUI extends BaseScriptComponent {
    */
   private updateOpenState(card: CardHandles, dt: number, x: number, y: number): void {
     card.openTime += card.selected ? dt : -dt
+    for (const it of card.contents) it.seenFrame = this.frameId
     if (card.openTime < 0) card.openTime = 0
     if (card.openTime > card.openDuration) card.openTime = card.openDuration
 
@@ -2418,13 +2454,20 @@ export class DeskOSUI extends BaseScriptComponent {
         const cur = item.root.getTransform().getLocalPosition()
         const sz = KIND_SIZE[item.def.kind]
         const b = boundsFor(sz.x, sz.y)
-        item.restX = Math.max(-b.x, Math.min(b.x, cur.x))
-        item.restY = Math.max(b.yMin, Math.min(b.yMax, cur.y))
-        item.pinned = true
+        const cx = Math.max(-b.x, Math.min(b.x, cur.x))
+        const cy = Math.max(b.yMin, Math.min(b.yMax, cur.y))
+
         if (!item.dragged) {
-          const moved =
-            Math.abs(item.restX - item.grabStartX) + Math.abs(item.restY - item.grabStartY)
+          const moved = Math.abs(cx - item.grabStartX) + Math.abs(cy - item.grabStartY)
           if (moved > DRAG_SELECT_THRESHOLD) item.dragged = true
+        }
+
+        // Pinning is what makes a file stop following its folder's ring slot.
+        // Touching a file must not do that — only moving it.
+        if (item.dragged) {
+          item.restX = cx
+          item.restY = cy
+          item.pinned = true
         }
       } else if (item.settleT < 1) {
         item.settleT = Math.min(1, item.settleT + dt / SETTLE_DUR)

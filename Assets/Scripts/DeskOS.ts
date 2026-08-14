@@ -683,6 +683,7 @@ export class DeskOS extends BaseScriptComponent {
     // Scope limit: selection is visible feedback only — no folder contents.
     const alreadySelected = this.uiDesk.getSelected() === id
     const next = alreadySelected ? null : id
+    print("[DeskOS] folderSelected " + id + " was=" + this.uiDesk.getSelected() + " next=" + next)
     this.uiDesk.setSelected(next)
     this.uiDesk.setStatus(next === null ? "Anchored to surface" : `${this.uiDesk.getFolderTitle(next)} selected`)
     this.audio?.playCardSelect()
