@@ -248,6 +248,7 @@ const CONTENTS: Record<string, ContentDef[]> = {
     {kind: "image", name: "", meta: "", reserve: true},
     {kind: "text", name: "", meta: "", reserve: true},
     {kind: "audio", name: "", meta: "", reserve: true},
+    {kind: "audio", name: "", meta: "", reserve: true},
     {kind: "audio", name: "", meta: "", reserve: true}
   ],
   Photos: [
@@ -259,6 +260,7 @@ const CONTENTS: Record<string, ContentDef[]> = {
     {kind: "image", name: "", meta: "", reserve: true},
     {kind: "image", name: "", meta: "", reserve: true},
     {kind: "text", name: "", meta: "", reserve: true},
+    {kind: "audio", name: "", meta: "", reserve: true},
     {kind: "audio", name: "", meta: "", reserve: true},
     {kind: "audio", name: "", meta: "", reserve: true}
   ],
@@ -283,6 +285,7 @@ const CONTENTS: Record<string, ContentDef[]> = {
     {kind: "image", name: "", meta: "", reserve: true},
     {kind: "image", name: "", meta: "", reserve: true},
     {kind: "text", name: "", meta: "", reserve: true},
+    {kind: "audio", name: "", meta: "", reserve: true},
     {kind: "audio", name: "", meta: "", reserve: true},
     {kind: "audio", name: "", meta: "", reserve: true}
   ]
@@ -596,6 +599,7 @@ interface ContentHandles {
 export class DeskOSUI extends BaseScriptComponent {
   private statusText: Text | null = null
   private recordButton: Button | null = null
+  private voiceButton: Button | null = null
   private cards: CardHandles[] = []
   private selectedId: string | null = null
   /**
@@ -638,6 +642,7 @@ export class DeskOSUI extends BaseScriptComponent {
   private _onMoveRequested = new Event<void>()
   private _onCapturePhoto = new Event<void>()
   private _onToggleRecord = new Event<void>()
+  private _onVoiceRequested = new Event<void>()
 
   /** Fires when the user pinch-selects a folder card. Payload is the folder id. */
   get onFolderSelected(): PublicApi<string> {
@@ -682,6 +687,11 @@ export class DeskOSUI extends BaseScriptComponent {
   /** Fires when the user taps the voice-memo affordance (start or stop). */
   get onToggleRecord(): PublicApi<void> {
     return this._onToggleRecord.publicApi()
+  }
+
+  /** Push-to-talk pressed. */
+  get onVoiceRequested(): PublicApi<void> {
+    return this._onVoiceRequested.publicApi()
   }
 
   /** Fires when the user taps "Move" to re-place the desk on a surface. */
@@ -820,14 +830,17 @@ export class DeskOSUI extends BaseScriptComponent {
         const rightRow = this.flexRow(rightObj, 34, HEADER_H, {
           justify: FlexJustify.End,
           align: FlexAlign.Center,
-          gap: 1.0
+          gap: 0.7
         })
+        // Four affordances plus a status line have to share 34 cm, so both the
+        // text and the buttons give up a little width. Measured, not guessed:
+        // 7 + 4x6.0 + 4x0.7 = 33.8.
         this.statusText = this.addRowText(
           rightRow,
           "Anchored to surface",
           "Caption",
           COLOR_SECONDARY,
-          11.0
+          7.0
         )
         this.recordButton = this.addHeaderButton(
           rightRow,
@@ -838,6 +851,13 @@ export class DeskOSUI extends BaseScriptComponent {
         )
         this.addHeaderButton(rightRow, "PhotoButton", "Photo", ICON_IMAGE, () =>
           this._onCapturePhoto.invoke()
+        )
+        this.voiceButton = this.addHeaderButton(
+          rightRow,
+          "VoiceButton",
+          "Say",
+          ICON_AUDIO,
+          () => this._onVoiceRequested.invoke()
         )
         this.addMoveButton(rightRow)
       })
@@ -852,7 +872,7 @@ export class DeskOSUI extends BaseScriptComponent {
     icon: Texture,
     onTap: () => void
   ): Button {
-    const btnW = 7.0
+    const btnW = 6.0
     const btnH = 2.8
 
     const so = this.obj(parent, name)
@@ -1229,6 +1249,70 @@ export class DeskOSUI extends BaseScriptComponent {
         if (chip.def.name === name) chip.def.storagePath = storagePath
       }
     }
+  }
+
+  /** Everything currently on the desk, as the intent parser needs to see it. */
+  fileList(): {name: string; folderSlug: string}[] {
+    const out: {name: string; folderSlug: string}[] = []
+    for (const card of this.cards) {
+      for (const chip of card.contents) {
+        if (chip.delay === Number.MAX_VALUE) continue
+        if (chip.def.name.length === 0) continue
+        out.push({name: chip.def.name, folderSlug: card.def.id.toLowerCase()})
+      }
+    }
+    return out
+  }
+
+  /** Locate a file by name, wherever it currently lives. */
+  private findByName(name: string): {chip: ContentHandles; owner: CardHandles} | null {
+    for (const card of this.cards) {
+      for (const chip of card.contents) {
+        if (chip.def.name === name) return {chip, owner: card}
+      }
+    }
+    return null
+  }
+
+  /**
+   * Move a file into a folder by name — the spoken equivalent of dragging it.
+   *
+   * Shares the hand-off the release path uses, including re-deriving both
+   * folders' clocks: a folder that gains a file and does not re-derive never
+   * runs far enough for that file to finish emerging.
+   */
+  moveFileToFolder(name: string, folderSlug: string): boolean {
+    const hit = this.findByName(name)
+    const claimant = this.cardById(this.titleCaseSlug(folderSlug))
+    if (hit === null || claimant === null) return false
+    if (claimant === hit.owner) return true
+
+    const idx = hit.owner.contents.indexOf(hit.chip)
+    if (idx >= 0) hit.owner.contents.splice(idx, 1)
+    claimant.contents.push(hit.chip)
+    hit.chip.ownerId = claimant.def.id
+    hit.chip.pinned = false
+    hit.chip.grouped = true
+    hit.chip.p = 0
+    this.reflowRing(hit.owner)
+    this.reflowRing(claimant)
+    this.refreshOpenDuration(hit.owner)
+    this.refreshOpenDuration(claimant)
+    this.setSelected(claimant.def.id)
+    this._onFileRegrouped.invoke(name + " → " + claimant.def.id)
+    return true
+  }
+
+  /** Open a file's viewer by name, opening its folder first if need be. */
+  openFileByName(name: string): boolean {
+    const hit = this.findByName(name)
+    if (hit === null) return false
+    this.setSelected(hit.owner.def.id)
+    this.viewerItem = hit.chip
+    this.viewerFrom = hit.chip.root.getTransform().getLocalPosition()
+    this.populateViewer(hit.chip.def)
+    this._onFileOpened.invoke(hit.chip.def.name)
+    return true
   }
 
   /** Apply a downloaded photo to a file's chip thumbnail. */

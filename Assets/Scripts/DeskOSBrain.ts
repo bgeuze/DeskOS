@@ -70,6 +70,43 @@ const UNDERSTANDING_SCHEMA = {
   required: ["title", "meta", "folderSlug", "rationale"]
 }
 
+/** What the user asked the desk to do. */
+export interface DeskIntent {
+  action: "open" | "close" | "file" | "find" | "tidy" | "unknown"
+  /** Target folder for open/file. */
+  folderSlug: string | null
+  /** Target file for file/find. */
+  fileName: string | null
+  /** Short line to show back, in the user's own terms. */
+  say: string
+}
+
+const INTENT_SCHEMA = {
+  type: "OBJECT",
+  properties: {
+    action: {
+      type: "STRING",
+      enum: ["open", "close", "file", "find", "tidy", "unknown"],
+      description:
+        "'open' show a folder's contents. 'close' put the open folder away. " +
+        "'file' move a specific file into a folder. 'find' locate and open a file. " +
+        "'tidy' reorganise the whole desk. 'unknown' if it is none of these."
+    },
+    folderSlug: {type: "STRING", description: "Target folder slug, when one is meant."},
+    fileName: {
+      type: "STRING",
+      description: "Exact name of the file being referred to, copied from the list given."
+    },
+    say: {
+      type: "STRING",
+      description:
+        "Under six words, confirming what is about to happen, in plain language. " +
+        "Example: 'opening Projects'. If the action is unknown, say what was not understood."
+    }
+  },
+  required: ["action", "say"]
+}
+
 export class DeskOSBrain {
   /**
    * Look at one frame and decide what it is and where it goes.
@@ -192,5 +229,87 @@ export class DeskOSBrain {
     if (value === undefined || value === null) return fallback
     const s = String(value).trim()
     return s.length === 0 ? fallback : s
+  }
+}
+
+/**
+ * Turn a spoken sentence into something the desk can do.
+ *
+ * Separate from `understand` because the inputs are different in kind: this one
+ * sees text and the current desk, never an image. Both go through a response
+ * schema for the same reason — an intent scraped out of prose fails in a demo
+ * exactly when it matters.
+ */
+export async function interpretUtterance(
+  utterance: string,
+  folders: FolderChoice[],
+  files: {name: string; folderSlug: string}[]
+): Promise<DeskIntent | null> {
+  const folderLines: string[] = []
+  for (const f of folders) folderLines.push('- "' + f.slug + '" (' + f.title + ")")
+
+  const fileLines: string[] = []
+  for (const f of files) fileLines.push('- "' + f.name + '" in ' + f.folderSlug)
+
+  const instruction =
+    "You are the command interpreter for a spatial desktop worn on AR glasses. " +
+    "The user speaks; you decide which single action they meant.\n\n" +
+    "Folders:\n" + folderLines.join("\n") + "\n\n" +
+    "Files on the desk:\n" +
+    (fileLines.length === 0 ? "(none)" : fileLines.join("\n")) +
+    "\n\nMatch by meaning, not by exact words — \"put that with my work stuff\" means " +
+    "file it under the work-ish folder. Copy fileName exactly from the list; never " +
+    "invent one. Speech recognition is imperfect, so expect near-misses in names and " +
+    "resolve them to the closest real entry. If nothing plausibly matches, answer " +
+    "'unknown' rather than guessing an action the user did not ask for."
+
+  const request: GeminiTypes.Models.GenerateContentRequest = {
+    model: MODEL,
+    type: "generateContent",
+    body: {
+      systemInstruction: {role: "user", parts: [{text: instruction}]},
+      contents: [{role: "user", parts: [{text: utterance}]}],
+      generationConfig: {
+        responseMimeType: "application/json",
+        responseSchema: INTENT_SCHEMA,
+        temperature: 0.1,
+        maxOutputTokens: 300
+      }
+    }
+  }
+
+  try {
+    const response = await withTimeout(Gemini.models(request), THINK_TIMEOUT_S)
+    if (response === null) {
+      print("[DeskOSBrain] Intent timed out.")
+      return null
+    }
+    const raw = response.candidates[0].content.parts[0].text
+    const parsed = JSON.parse(raw)
+
+    // Trust nothing that names something: a hallucinated folder or file would
+    // send the action somewhere that does not exist.
+    let slug: string | null = parsed.folderSlug === undefined ? null : String(parsed.folderSlug)
+    if (slug !== null) {
+      let known = false
+      for (const f of folders) if (f.slug === slug) known = true
+      if (!known) slug = null
+    }
+    let file: string | null = parsed.fileName === undefined ? null : String(parsed.fileName)
+    if (file !== null) {
+      let known = false
+      for (const f of files) if (f.name === file) known = true
+      if (!known) file = null
+    }
+
+    return {
+      action: parsed.action,
+      folderSlug: slug,
+      fileName: file,
+      say: String(parsed.say === undefined ? "" : parsed.say)
+    }
+  } catch (e) {
+    print("[DeskOSBrain] Intent failed: " + e)
+    return null
   }
 }

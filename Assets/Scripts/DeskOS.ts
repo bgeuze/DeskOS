@@ -15,7 +15,8 @@ import {DeskOSAudio} from "./DeskOSAudio"
 import {DeskOSSurfacePlacer, SurfaceReject, SurfaceSample} from "./DeskOSSurfacePlacer"
 import {CloudDesk, DeskOSCloud} from "./DeskOSCloud"
 import {DeskOSCapture} from "./DeskOSCapture"
-import {DeskOSBrain} from "./DeskOSBrain"
+import {DeskIntent, DeskOSBrain, interpretUtterance} from "./DeskOSBrain"
+import {DeskOSVoice} from "./DeskOSVoice"
 import {ContentKind} from "./DeskOSTypes"
 import {
   billboardRotation,
@@ -97,6 +98,7 @@ export class DeskOS extends BaseScriptComponent {
   private textureCache: Record<string, Texture> = {}
   private capture: DeskOSCapture = new DeskOSCapture(this.cloud)
   private brain: DeskOSBrain = new DeskOSBrain()
+  private voice: DeskOSVoice = new DeskOSVoice()
   /** One capture at a time — a second pinch mid-flight would race the first. */
   private capturing = false
   /** Distinguishes concurrent-ish captures; the display name is not stable. */
@@ -147,6 +149,7 @@ export class DeskOS extends BaseScriptComponent {
     this.uiDesk.onFolderSelected.add((id: string) => this.onFolderSelected(id))
     this.uiDesk.onCapturePhoto.add(() => this.onCapturePhoto())
     this.uiDesk.onToggleRecord.add(() => this.onToggleRecord())
+    this.uiDesk.onVoiceRequested.add(() => this.onVoiceRequested())
     this.uiDesk.onFolderHoverEnter.add(() => this.audio?.playCardHover())
     this.uiDesk.onMoveRequested.add(() => this.enterPlacingMode())
 
@@ -384,6 +387,84 @@ export class DeskOS extends BaseScriptComponent {
     const track = this.micAudioTrack === undefined ? null : this.micAudioTrack
     const started = this.capture.startRecording(track)
     this.uiDesk.setStatus(started ? "Recording — tap Memo to stop" : "Microphone unavailable")
+  }
+
+  /**
+   * Push-to-talk: listen, then do what was asked.
+   *
+   * Tap to start, tap again to cut it short — the session also ends by itself
+   * after a pause, so a user who just speaks and stops never has to think
+   * about the button twice.
+   */
+  private onVoiceRequested(): void {
+    if (this.voice.isListening()) {
+      this.voice.stop()
+      this.uiDesk.setStatus("Thinking…")
+      return
+    }
+
+    const started = this.voice.start(
+      (text: string) => this.onHeard(text),
+      (code: string) => this.uiDesk.setStatus("Could not listen (" + code + ")")
+    )
+    if (started) this.uiDesk.setStatus("Listening…")
+  }
+
+  private async onHeard(text: string): Promise<void> {
+    this.uiDesk.setStatus('"' + text + '"')
+
+    const intent = await interpretUtterance(
+      text,
+      this.uiDesk.folderChoices(),
+      this.uiDesk.fileList()
+    )
+    if (intent === null) {
+      this.uiDesk.setStatus("Did not catch that")
+      return
+    }
+
+    print(
+      "[DeskOS] Intent " + intent.action +
+        " folder=" + intent.folderSlug + " file=" + intent.fileName
+    )
+    this.applyIntent(intent)
+  }
+
+  private applyIntent(intent: DeskIntent): void {
+    this.audio?.playCardSelect()
+
+    if (intent.action === "open" && intent.folderSlug !== null) {
+      this.uiDesk.setSelected(this.titleCase(intent.folderSlug))
+      this.uiDesk.setStatus(intent.say)
+      return
+    }
+
+    if (intent.action === "close") {
+      this.uiDesk.setSelected(null)
+      this.uiDesk.setStatus(intent.say)
+      return
+    }
+
+    if (intent.action === "file" && intent.fileName !== null && intent.folderSlug !== null) {
+      const moved = this.uiDesk.moveFileToFolder(intent.fileName, intent.folderSlug)
+      this.uiDesk.setStatus(moved ? intent.say : "Could not move that")
+      return
+    }
+
+    if (intent.action === "find" && intent.fileName !== null) {
+      const found = this.uiDesk.openFileByName(intent.fileName)
+      this.uiDesk.setStatus(found ? intent.say : "Could not find that")
+      return
+    }
+
+    if (intent.action === "tidy") {
+      // Deliberately honest rather than silently doing nothing: the desk-wide
+      // reorganise is not built yet.
+      this.uiDesk.setStatus("Tidying is not wired up yet")
+      return
+    }
+
+    this.uiDesk.setStatus(intent.say.length > 0 ? intent.say : "Not sure what that meant")
   }
 
   /** Open folder wins, so a capture lands where the user is looking. */
