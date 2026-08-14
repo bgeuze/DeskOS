@@ -69,6 +69,14 @@ export class DeskOSCloud {
   private rowIdByName: Record<string, string> = {}
   private folderIdBySlug: Record<string, string> = {}
 
+  /**
+   * One-shot wipe before reading, so the next load re-seeds a clean desk.
+   *
+   * Development affordance, not a feature — test captures accumulate and eat
+   * the chip reserves. Left off; flipped on deliberately.
+   */
+  purgeOnLoad = false
+
   /** True once signed in and a desk has been read. */
   isReady(): boolean {
     return this.ready
@@ -122,6 +130,7 @@ export class DeskOSCloud {
     }
 
     if (!(await this.signIn())) return null
+    if (this.purgeOnLoad) await this.purgeDesk()
     await this.bootstrapIfEmpty()
     return await this.readDesk()
   }
@@ -161,6 +170,52 @@ export class DeskOSCloud {
     this.uid = anon.data.user.id
     print("[DeskOSCloud] Signed in anonymously (preview): " + this.uid)
     return true
+  }
+
+  /**
+   * Clear this user's desk — rows first, then the media behind them.
+   *
+   * RLS scopes every statement to the signed-in user, so this cannot reach
+   * another desk even if the filter were wrong. Files go before folders,
+   * because desk_files carries the folder foreign key. Seeded media lives
+   * under `<kind>/seed/` and is shared, so only this user's own prefix is
+   * touched.
+   */
+  private async purgeDesk(): Promise<void> {
+    const client = this.client
+    if (client === null) return
+
+    const files = await client.from("desk_files").delete().eq("user_id", this.uid)
+    if (files.error !== null) {
+      print("[DeskOSCloud] Clearing files failed: " + JSON.stringify(files.error))
+      return
+    }
+    const folders = await client.from("desk_folders").delete().eq("user_id", this.uid)
+    if (folders.error !== null) {
+      print("[DeskOSCloud] Clearing folders failed: " + JSON.stringify(folders.error))
+      return
+    }
+
+    for (const kind of ["image", "audio"]) {
+      const prefix = kind + "/" + this.uid
+      const listing = await client.storage.from(BUCKET).list(prefix)
+      if (listing.error !== null || listing.data === null) continue
+
+      const paths: string[] = []
+      for (const entry of listing.data) paths.push(prefix + "/" + entry.name)
+      if (paths.length === 0) continue
+
+      const removed = await client.storage.from(BUCKET).remove(paths)
+      if (removed.error !== null) {
+        print("[DeskOSCloud] Clearing " + kind + " media failed: " + JSON.stringify(removed.error))
+        continue
+      }
+      print("[DeskOSCloud] Cleared " + paths.length + " " + kind + " upload(s).")
+    }
+
+    this.rowIdByName = {}
+    this.folderIdBySlug = {}
+    print("[DeskOSCloud] Desk cleared — bootstrap will re-seed.")
   }
 
   /**
