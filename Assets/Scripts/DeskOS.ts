@@ -400,18 +400,19 @@ export class DeskOS extends BaseScriptComponent {
    * after a pause, so a user who just speaks and stops never has to think
    * about the button twice.
    */
-  private onVoiceRequested(): void {
+  private async onVoiceRequested(): Promise<void> {
     if (this.voice.isListening()) {
       this.voice.stop()
       this.uiDesk.setStatus("Thinking…")
       return
     }
 
-    const started = this.voice.start(
+    this.uiDesk.setStatus("Listening…")
+    const started = await this.voice.start(
       (text: string) => this.onHeard(text),
       (code: string) => this.uiDesk.setStatus("Could not listen (" + code + ")")
     )
-    if (started) this.uiDesk.setStatus("Listening…")
+    if (!started) this.uiDesk.setStatus("Already listening")
   }
 
   private async onHeard(text: string): Promise<void> {

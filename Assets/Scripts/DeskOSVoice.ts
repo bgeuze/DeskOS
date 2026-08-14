@@ -27,6 +27,15 @@ export class DeskOSVoice {
   private bound = false
   private onFinal: ((text: string) => void) | null = null
   private options: AsrModule.AsrTranscriptionOptions | null = null
+  /**
+   * The teardown of the previous session, while it is still running.
+   *
+   * A finished phrase does not close the session — that has to be asked for.
+   * Starting a new one on top of a live session yields AsrStatusCode 1
+   * (InternalError), which is why the first command worked and every one after
+   * it failed.
+   */
+  private closing: Promise<void> | null = null
 
   isListening(): boolean {
     return this.listening
@@ -39,8 +48,22 @@ export class DeskOSVoice {
    * microphone surfaces through onTranscriptionErrorEvent instead, because the
    * platform's own status code says more than a guess made up front.
    */
-  start(onFinal: (text: string) => void, onError: (code: string) => void): boolean {
+  async start(
+    onFinal: (text: string) => void,
+    onError: (code: string) => void
+  ): Promise<boolean> {
     if (this.listening) return false
+
+    // Let the previous session finish closing before opening another.
+    if (this.closing !== null) {
+      try {
+        await this.closing
+      } catch (e) {
+        print("[DeskOSVoice] Previous session did not close cleanly: " + e)
+      }
+      this.closing = null
+    }
+
     this.onFinal = onFinal
 
     if (this.options === null) {
@@ -57,6 +80,9 @@ export class DeskOSVoice {
         if (!event.isFinal) return
         const text = event.text.trim()
         this.listening = false
+        // Close it now: the phrase being final does not end the session, and a
+        // session left open poisons the next one.
+        this.closing = asrModule.stopTranscribing()
         print("[DeskOSVoice] Heard: " + text)
         const handler = this.onFinal
         this.onFinal = null
@@ -65,6 +91,8 @@ export class DeskOSVoice {
       this.options.onTranscriptionErrorEvent.add((code: AsrModule.AsrStatusCode) => {
         this.listening = false
         this.onFinal = null
+        // Tear down on failure too, or the bad session blocks every retry.
+        this.closing = asrModule.stopTranscribing()
         print("[DeskOSVoice] Transcription error: " + code)
         onError(String(code))
       })
@@ -80,6 +108,6 @@ export class DeskOSVoice {
   stop(): void {
     if (!this.listening) return
     this.listening = false
-    asrModule.stopTranscribing()
+    this.closing = asrModule.stopTranscribing()
   }
 }
