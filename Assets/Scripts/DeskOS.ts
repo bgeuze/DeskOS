@@ -332,7 +332,13 @@ export class DeskOS extends BaseScriptComponent {
         "image/jpeg",
         "jpg"
       )
-      if (stored === null) print("[DeskOS] " + title + " is on the desk but not in the cloud.")
+      if (stored === null) {
+        print("[DeskOS] " + title + " is on the desk but not in the cloud.")
+      } else if (stored.storagePath !== null) {
+        // Without this the card works only until the next launch: the texture
+        // cache is keyed by name and lives in memory, the path is what survives.
+        this.uiDesk.setFileStoragePath(title, stored.storagePath)
+      }
     } catch (e) {
       print("[DeskOS] Capture failed: " + e)
       this.uiDesk.setStatus("Capture failed")
@@ -367,6 +373,7 @@ export class DeskOS extends BaseScriptComponent {
       const token = "memo-" + this.captureSeq
       if (this.uiDesk.seatCapture(folder, "audio", result.name, result.meta, null, token)) {
         this.uiDesk.finishCapture(token, result.name, result.meta, null, folder)
+        this.uiDesk.setFileStoragePath(result.name, result.storagePath)
       } else {
         print("[DeskOS] " + result.name + " is stored but the desk has no room for it.")
       }

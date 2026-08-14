@@ -1215,6 +1215,22 @@ export class DeskOSUI extends BaseScriptComponent {
     rr.size = new vec2(tw * k, th * k)
   }
 
+  /**
+   * Tell a freshly captured file where its bytes ended up.
+   *
+   * seatCapture deliberately clears the storage path — the chip it claims may
+   * have been holding some other file's. The path only exists once the upload
+   * has returned, which is after seating, so it is filled in here. Without it
+   * the viewer has nothing to fetch and a recording plays silence.
+   */
+  setFileStoragePath(name: string, storagePath: string): void {
+    for (const card of this.cards) {
+      for (const chip of card.contents) {
+        if (chip.def.name === name) chip.def.storagePath = storagePath
+      }
+    }
+  }
+
   /** Apply a downloaded photo to a file's chip thumbnail. */
   setFileTexture(name: string, texture: Texture): void {
     for (const card of this.cards) {

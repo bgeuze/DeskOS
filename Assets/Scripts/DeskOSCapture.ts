@@ -205,7 +205,9 @@ export class DeskOSCapture {
    * put the memo on the desk, and recomputing the duration there would mean
    * knowing the sample rate the provider actually used.
    */
-  async stopRecording(folderSlug: string): Promise<{name: string; meta: string} | null> {
+  async stopRecording(
+    folderSlug: string
+  ): Promise<{name: string; meta: string; storagePath: string} | null> {
     const mic = this.micControl
     if (!this.recording || mic === null) return null
 
@@ -239,7 +241,7 @@ export class DeskOSCapture {
       "audio/wav",
       "wav"
     )
-    return file === null ? null : {name, meta}
+    return file === null ? null : {name, meta, storagePath: file.storagePath as string}
   }
 
   /** 16-bit PCM mono with a RIFF header — the smallest thing every player accepts. */
