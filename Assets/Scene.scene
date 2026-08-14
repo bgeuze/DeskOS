@@ -726,8 +726,8 @@
   ScriptInputs:
     "":
       openAIToken: "[INSERT OPEN AI TOKEN]"
-      googleToken: "[INSERT GOOGLE TOKEN]"
-      snapToken: "[INSERT SNAP TOKEN]"
+      googleToken: 8e729747-bbba-465f-ac82-214d7c56cd52
+      snapToken: 43a39fd4-76ac-4100-a8a8-1deac15bd9b7
       enableLogging: false
       enableLoggingLifecycle: false
   ScriptTypes:

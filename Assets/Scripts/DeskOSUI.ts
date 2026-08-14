@@ -1033,6 +1033,86 @@ export class DeskOSUI extends BaseScriptComponent {
     return {seated: claimed.length, unseated}
   }
 
+  /**
+   * Folders as the brain is allowed to see them.
+   *
+   * Includes what each folder currently holds, because filing by theme needs to
+   * know the theme — "Projects" says far less about where a photo belongs than
+   * the fact that it already holds a roadmap and a spec.
+   */
+  folderChoices(): {slug: string; title: string; examples: string[]}[] {
+    const out: {slug: string; title: string; examples: string[]}[] = []
+    for (const card of this.cards) {
+      const examples: string[] = []
+      for (const chip of card.contents) {
+        if (!chip.root.enabled) continue
+        if (chip.def.name.length === 0) continue
+        examples.push(chip.def.name)
+      }
+      out.push({slug: card.def.id.toLowerCase(), title: card.def.title, examples})
+    }
+    return out
+  }
+
+  /**
+   * Give a freshly captured file a home on the desk.
+   *
+   * Same constraint as applyCloudDesk, same answer: chips cannot be created
+   * once the scene has started, so a capture claims one the pool is holding in
+   * reserve — a chip of the right kind that no cloud file seated and that
+   * applyCloudDesk therefore parked. This is why the pool is deliberately
+   * larger than the seeded content.
+   *
+   * Returns false when that folder has no reserve left of this kind, so the
+   * caller can say so out loud instead of dropping the capture on the floor.
+   */
+  seatCapture(
+    folderSlug: string,
+    kind: ContentKind,
+    name: string,
+    meta: string,
+    body: string[] | null
+  ): boolean {
+    const card = this.cardById(this.titleCaseSlug(folderSlug))
+    if (card === null) return false
+
+    let seat: ContentHandles | null = null
+    for (const chip of card.contents) {
+      if (chip.def.kind !== kind) continue
+      if (chip.root.enabled) continue
+      seat = chip
+      break
+    }
+    if (seat === null) return false
+
+    seat.def.name = name
+    seat.def.meta = meta
+    seat.def.body = body === null ? undefined : body
+    seat.def.storagePath = undefined
+    seat.nameText.text = name
+    seat.nameText.layoutRect = this.captionRect(name)
+
+    // Undo the parking. delay 0 puts the new file at the front of the
+    // emergence queue rather than the back — a capture should come out first,
+    // not wait behind everything already on the desk. p starts at 0 so the
+    // rate limiter animates it out over CONTENT_ITEM_DUR even when the folder
+    // is already open and its clock is long past.
+    seat.root.enabled = true
+    seat.tetherObj.enabled = true
+    seat.delay = 0
+    seat.p = 0
+    seat.pinned = false
+    seat.grouped = true
+    seat.ownerId = card.def.id
+    seat.interactive = false
+    this.refreshOpenDuration(card)
+
+    // Open the folder it landed in, so the arrival is something the user
+    // watches rather than something that happened behind a closed lid.
+    this.setSelected(card.def.id)
+    return true
+  }
+
   /** Apply a downloaded photo to a file's chip thumbnail. */
   setFileTexture(name: string, texture: Texture): void {
     for (const card of this.cards) {

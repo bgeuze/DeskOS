@@ -1,6 +1,7 @@
 import {createClient, SupabaseClient} from "SupabaseClient.lspkg/supabase-snapcloud"
 
 import {ContentKind} from "./DeskOSTypes"
+import {withTimeout} from "./DeskOSAsync"
 
 /**
  * DeskOS — Snap Cloud backing store.
@@ -480,7 +481,7 @@ export class DeskOSCloud {
     }
 
     try {
-      const response = await this.withTimeout(
+      const response = await withTimeout(
         internetModule.fetch(supabaseProject.url + "/auth/v1/health", {method: "GET"}),
         PROBE_TIMEOUT_S
       )
@@ -496,36 +497,6 @@ export class DeskOSCloud {
       print("[DeskOSCloud] Backend unreachable: " + e)
       return false
     }
-  }
-
-  /**
-   * Resolve null on timeout, but let genuine failures reject — the rejection
-   * carries the message that says *why*, which is the whole diagnostic value.
-   */
-  private withTimeout<T>(work: Promise<T>, seconds: number): Promise<T | null> {
-    return new Promise((resolve, reject) => {
-      let settled = false
-      const timer = setTimeout(() => {
-        if (settled) return
-        settled = true
-        resolve(null)
-      }, seconds * 1000)
-
-      work.then(
-        (value) => {
-          if (settled) return
-          settled = true
-          clearTimeout(timer)
-          resolve(value)
-        },
-        (error) => {
-          if (settled) return
-          settled = true
-          clearTimeout(timer)
-          reject(error)
-        }
-      )
-    })
   }
 
   private wait(seconds: number): Promise<void> {

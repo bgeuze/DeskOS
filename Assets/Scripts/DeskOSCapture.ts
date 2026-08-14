@@ -18,7 +18,20 @@ const cameraModule = require("LensStudio:CameraModule") as CameraModule
 /** Voice is speech, not music — 16 kHz keeps the upload small with no audible loss. */
 const VOICE_SAMPLE_RATE = 16000
 
+/** One frozen frame, encoded once and usable by both consumers. */
+export interface CapturedFrame {
+  /** For Gemini, which takes image bytes inline as base64. */
+  base64: string
+  /** For Storage, which takes raw bytes. */
+  bytes: Uint8Array
+  /** For showing the user what they just captured, before it is understood. */
+  texture: Texture
+}
+
 export class DeskOSCapture {
+  private cameraTexture: Texture | null = null
+  private frameReg: EventRegistration | null = null
+  private framesSeen = 0
   private recording = false
   private frames: Float32Array[] = []
   private sampleCount = 0
@@ -31,56 +44,83 @@ export class DeskOSCapture {
   }
 
   /**
-   * Camera still → JPEG → Storage, registered as an image file in `folderSlug`.
-   * Resolves with the new file's display name, or null if anything refused.
+   * Begin the continuous camera stream.
+   *
+   * Deliberately not `requestImage`. Still capture is device-only, so building
+   * on it would make the whole feature undemonstrable without hardware — and
+   * unverifiable, which is worse. The continuous stream runs in the editor too,
+   * so copying a frame off the live texture is both the portable path and the
+   * responsive one: the frame is already in hand when the user pinches, rather
+   * than being requested at that moment.
    */
-  async capturePhoto(folderSlug: string): Promise<string | null> {
-    if (global.deviceInfoSystem.isEditor()) {
-      print("[DeskOSCapture] Camera is device-only — cannot capture in preview.")
-      return null
-    }
-    if (!this.cloud.isReady()) {
-      print("[DeskOSCapture] Cloud not ready — capture discarded.")
-      return null
-    }
+  startCamera(): void {
+    if (this.cameraTexture !== null) return
 
     try {
-      const request = CameraModule.createImageRequest()
-      ;(request as unknown as {cameraId: number}).cameraId = CameraModule.CameraId.Default_Color
-      const frame = await cameraModule.requestImage(request)
-
-      const bytes = await this.encodeJpeg(frame.texture)
-      if (bytes === null) return null
-
-      const name = "Photo " + this.stamp()
-      const file = await this.cloud.uploadCapture(
-        "image" as ContentKind,
-        name,
-        "JPG",
-        folderSlug,
-        bytes,
-        "image/jpeg",
-        "jpg"
-      )
-      return file === null ? null : name
+      const request = CameraModule.createCameraRequest()
+      request.cameraId = CameraModule.CameraId.Default_Color
+      this.cameraTexture = cameraModule.requestCamera(request)
+      const provider = this.cameraTexture.control as CameraTextureProvider
+      // Counting frames rather than trusting the request: a stream that was
+      // accepted but never delivers is indistinguishable from a working one
+      // until you ask for a frame and get nothing.
+      this.frameReg = provider.onNewFrame.add(() => {
+        this.framesSeen++
+      })
+      print("[DeskOSCapture] Camera stream started.")
     } catch (e) {
-      print("[DeskOSCapture] Photo capture failed: " + e)
-      return null
+      print("[DeskOSCapture] Camera unavailable: " + e)
+      this.cameraTexture = null
     }
   }
 
+  stopCamera(): void {
+    const texture = this.cameraTexture
+    if (texture !== null && this.frameReg !== null) {
+      const provider = texture.control as CameraTextureProvider
+      provider.onNewFrame.remove(this.frameReg)
+    }
+    this.frameReg = null
+    this.cameraTexture = null
+    this.framesSeen = 0
+  }
+
+  /** True only once the stream has actually delivered something worth copying. */
+  isCameraReady(): boolean {
+    return this.cameraTexture !== null && this.framesSeen > 0
+  }
+
   /**
-   * Texture → JPEG bytes.
+   * Freeze the current frame and encode it once.
    *
-   * Uses `encodeTextureAsync` + `decode`, which is what this runtime actually
-   * exposes — there is no `Base64.encodeJpeg`, and `decode` already returns a
-   * Uint8Array rather than a binary string.
+   * Both representations come out of a single encode because both are needed —
+   * base64 goes to Gemini inline, the decoded bytes go to Storage. Encoding
+   * twice would double the cost of every capture for nothing.
    */
-  private encodeJpeg(texture: Texture): Promise<Uint8Array | null> {
+  async grabFrame(): Promise<CapturedFrame | null> {
+    if (!this.isCameraReady()) {
+      print("[DeskOSCapture] No camera frame available yet.")
+      return null
+    }
+
+    const frozen = (this.cameraTexture as Texture).copyFrame()
+    const base64 = await this.encodeJpeg(frozen)
+    if (base64 === null) return null
+
+    return {base64, bytes: Base64.decode(base64), texture: frozen}
+  }
+
+  /**
+   * Texture → base64 JPEG.
+   *
+   * `encodeTextureAsync` is what this runtime actually exposes — there is no
+   * `Base64.encodeJpeg`, whatever the samples suggest.
+   */
+  private encodeJpeg(texture: Texture): Promise<string | null> {
     return new Promise((resolve) => {
       Base64.encodeTextureAsync(
         texture,
-        (encoded: string) => resolve(Base64.decode(encoded)),
+        (encoded: string) => resolve(encoded),
         () => {
           print("[DeskOSCapture] JPEG encode failed.")
           resolve(null)

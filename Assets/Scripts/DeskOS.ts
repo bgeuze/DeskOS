@@ -15,6 +15,8 @@ import {DeskOSAudio} from "./DeskOSAudio"
 import {DeskOSSurfacePlacer, SurfaceReject, SurfaceSample} from "./DeskOSSurfacePlacer"
 import {CloudDesk, DeskOSCloud} from "./DeskOSCloud"
 import {DeskOSCapture} from "./DeskOSCapture"
+import {DeskOSBrain} from "./DeskOSBrain"
+import {ContentKind} from "./DeskOSTypes"
 import {
   billboardRotation,
   deskAnchorRotation,
@@ -94,6 +96,9 @@ export class DeskOS extends BaseScriptComponent {
   /** Downloaded photos, kept so opening a viewer does not re-fetch. */
   private textureCache: Record<string, Texture> = {}
   private capture: DeskOSCapture = new DeskOSCapture(this.cloud)
+  private brain: DeskOSBrain = new DeskOSBrain()
+  /** One capture at a time — a second pinch mid-flight would race the first. */
+  private capturing = false
   /** Captures land in whichever folder is open, else the first one. */
   private captureTarget = "photos"
   private audio: DeskOSAudio | null = null
@@ -180,6 +185,11 @@ export class DeskOS extends BaseScriptComponent {
     // Fired and forgotten: the desk is fully usable on its built-in content, so
     // the network must never gate startup. Cloud data arrives when it arrives.
     this.loadCloud()
+
+    // Started up front, not on demand. The stream needs a moment to deliver its
+    // first frame, and asking for one at pinch time would make every capture
+    // wait for that warm-up.
+    this.capture.startCamera()
   }
 
   // ── Frame loop ────────────────────────────────────────────────────────────
@@ -256,15 +266,78 @@ export class DeskOS extends BaseScriptComponent {
     }
   }
 
+  /**
+   * Look at something, pinch, and have it land filed.
+   *
+   * Three stages that fail independently on purpose: the frame is the capture,
+   * the understanding is a nicety, and the upload is durability. Losing the
+   * later ones degrades the result but never discards what the user actually
+   * did — a photo that lands as "Photo 14:32" in the open folder is still a
+   * photo that landed.
+   */
   private async onCapturePhoto(): Promise<void> {
-    this.uiDesk.setStatus("Capturing…")
-    const name = await this.capture.capturePhoto(this.currentFolderSlug())
-    if (name === null) {
-      this.uiDesk.setStatus("Capture unavailable")
-      return
+    if (this.capturing) return
+    this.capturing = true
+
+    try {
+      this.uiDesk.setStatus("Capturing…")
+      const frame = await this.capture.grabFrame()
+      if (frame === null) {
+        this.uiDesk.setStatus("Camera unavailable")
+        return
+      }
+
+      this.uiDesk.setStatus("Reading it…")
+      const folders = this.uiDesk.folderChoices()
+      const seen = await this.brain.understand(frame.base64, folders)
+
+      const title = seen === null ? "Photo " + this.clock() : seen.title
+      const meta = seen === null ? "JPG" : seen.meta
+      const kind = seen === null ? ("image" as ContentKind) : seen.kind
+      const slug = seen === null ? this.currentFolderSlug() : seen.folderSlug
+      const body = seen === null ? null : seen.body
+
+      if (!this.uiDesk.seatCapture(slug, kind, title, meta, body)) {
+        this.uiDesk.setStatus(this.uiDesk.getFolderTitle(this.titleCase(slug)) + " is full")
+        return
+      }
+
+      // The photo is on the chip before the upload finishes — the user should
+      // see what they captured immediately, not after a round trip.
+      if (kind === "image") {
+        this.textureCache[title] = frame.texture
+        this.uiDesk.setFileTexture(title, frame.texture)
+      }
+
+      this.audio?.playCardSelect()
+      this.uiDesk.setStatus(seen === null ? title + " saved" : title + " — " + seen.rationale)
+
+      const stored = await this.cloud.uploadCapture(
+        kind,
+        title,
+        meta,
+        slug,
+        frame.bytes,
+        "image/jpeg",
+        "jpg"
+      )
+      if (stored === null) print("[DeskOS] " + title + " is on the desk but not in the cloud.")
+    } catch (e) {
+      print("[DeskOS] Capture failed: " + e)
+      this.uiDesk.setStatus("Capture failed")
+    } finally {
+      this.capturing = false
     }
-    this.audio?.playCardSelect()
-    this.uiDesk.setStatus(name + " saved")
+  }
+
+  private clock(): string {
+    const d = new Date()
+    const two = (n: number): string => (n < 10 ? "0" : "") + n
+    return two(d.getHours()) + ":" + two(d.getMinutes())
+  }
+
+  private titleCase(slug: string): string {
+    return slug.length === 0 ? slug : slug.charAt(0).toUpperCase() + slug.slice(1)
   }
 
   private async onToggleRecord(): Promise<void> {
