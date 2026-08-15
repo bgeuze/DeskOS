@@ -445,6 +445,10 @@ const BIN_SIZE = new vec2(9.0, 6.0)
  */
 const BIN_RADIUS = 7.0
 const BIN_GLOW_SPEED = 12.0
+
+/** How long a file takes to come apart once the bin has it (s). */
+const BIN_DEATH_DUR = 0.42
+const BIN_DEATH_SPIN_DEG = 220
 const BIN_FILL = new vec4(0.16, 0.10, 0.12, 0.9)
 const BIN_ACCENT = new vec4(1.0, 0.45, 0.42, 1)
 
@@ -648,6 +652,15 @@ interface ContentHandles {
    * chip twice. An image chip loses its glyph the moment a real photo lands.
    */
   icon: SceneObject | null
+  /**
+   * Seconds into the delete animation, or -1 when alive.
+   *
+   * A dying chip has already left its folder's contents list, so nothing else
+   * drives it — it gets its own pass, and its name is kept here because parking
+   * clears def.name and the deletion has to be reported by name.
+   */
+  dying: number
+  dyingName: string
   /** Mat-local spot where the current grab began, for telling a drag from a tap. */
   grabStartX: number
   grabStartY: number
@@ -2034,6 +2047,8 @@ export class DeskOSUI extends BaseScriptComponent {
         nameText: refs.nameText as Text,
         thumb: refs.thumb,
         icon: refs.icon,
+        dying: -1,
+        dyingName: "",
         grabStartX: 0,
         grabStartY: 0,
         dragged: false,
@@ -2143,15 +2158,22 @@ export class DeskOSUI extends BaseScriptComponent {
       this.viewerItem = null
     }
 
-    this.park(item)
+    // Leave the folder now — the ring should close over the gap while the file
+    // is still visibly coming apart, not after it has gone.
     if (owner !== null) {
       const idx = owner.contents.indexOf(item)
       if (idx >= 0) owner.contents.splice(idx, 1)
       this.reflowRing(owner)
       this.refreshOpenDuration(owner)
     }
+
+    item.dying = 0
+    item.dyingName = name
+    item.grabbed = false
+    item.snapPending = false
+    item.interactive = false
+    item.tetherObj.enabled = false
     this.binArm = 0
-    this._onFileDeleted.invoke(name)
   }
 
   /** One mock content chip. Silhouette, accent and body treatment all differ per kind. */
@@ -2606,10 +2628,51 @@ export class DeskOSUI extends BaseScriptComponent {
       this.updateOpenState(card, dt, x, y)
     }
 
+    // Files being deleted. They have already left their folder, so this is the
+    // only thing driving them.
+    for (const item of this.allContents) {
+      if (item.dying < 0) continue
+      item.seenFrame = this.frameId // not an orphan; it is on its way out
+      item.dying += dt
+      const k = clamp01(item.dying / BIN_DEATH_DUR)
+
+      if (k >= 1) {
+        const name = item.dyingName
+        item.dying = -1
+        item.dyingName = ""
+        const tr = item.root.getTransform()
+        tr.setLocalRotation(quat.quatIdentity())
+        tr.setLocalScale(vec3.one())
+        this.park(item)
+        this._onFileDeleted.invoke(name)
+        continue
+      }
+
+      // Falls into the bin while it comes apart: it shrinks away, turns, and
+      // travels the last of the distance itself, so the bin is visibly what
+      // took it rather than where it happened to be let go.
+      const e = easeOutCubic(k)
+      const tr = item.root.getTransform()
+      const from = tr.getLocalPosition()
+      tr.setLocalPosition(
+        new vec3(
+          from.x + (BIN_POS.x - from.x) * (e * 0.35),
+          from.y + (BIN_POS.y - from.y) * (e * 0.35),
+          from.z
+        )
+      )
+      tr.setLocalRotation(
+        quat.angleAxis((BIN_DEATH_SPIN_DEG * Math.PI / 180) * e, new vec3(0, 0, 1))
+      )
+      const shrink = 1 - e
+      tr.setLocalScale(new vec3(shrink, shrink, 1))
+    }
+
     // Anything no folder claimed this frame has fallen out of the ownership
     // lists. It cannot retract on its own, so retire it here rather than leave
     // it hanging over the desk.
     for (const item of this.allContents) {
+      if (item.dying >= 0) continue
       if (item.seenFrame === this.frameId) continue
       print("[UI] orphaned chip retired: " + item.def.name)
       item.p = 0

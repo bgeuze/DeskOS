@@ -264,6 +264,7 @@ export class DeskOS extends BaseScriptComponent {
     // first frame, and asking for one at pinch time would make every capture
     // wait for that warm-up.
     this.capture.startCamera()
+
     if (global.deviceInfoSystem.isEditor()) {
       this.capture.useEditorStandIn(this.previewCaptureCamera, this.previewCaptureTarget)
     }
