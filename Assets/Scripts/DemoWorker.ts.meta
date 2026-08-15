@@ -1,0 +1,66 @@
+- !<AssetImportMetadata/7445aae6-9525-453d-9b65-f8dc8ed00bad>
+  ImportedAssetIds:
+    TypeScriptAsset: !<reference> 8536333b-cec6-43cf-9404-4a6a36efe43d
+  ImporterName: TypeScriptAssetImporter
+  PrimaryAsset: !<reference> 8536333b-cec6-43cf-9404-4a6a36efe43d
+  PackageType: NotAPackage
+  LegacyPackagePolicy: ~
+  ExtraData:
+    {}
+  AssetDataMap:
+    TypeScriptAsset: !<own> c2906a02-9760-469a-a828-5ca2e3129a31
+  DependentFiles:
+    []
+  ImporterSettings: !<AssetImporterSettings>
+    {}
+  CompressionSettings: !<own> 00000000-0000-0000-0000-000000000000
+- !<TypeScriptAssetData/c2906a02-9760-469a-a828-5ca2e3129a31>
+  SvgIcon: ""
+  SetupScript:
+    code: ""
+  Description: ""
+  VersionMajor: 0
+  VersionMinor: 0
+  VersionPatch: 0
+  VersionPrerelease: ""
+  ComponentUid: f4b5fbbe-b719-49bd-873e-23181e7ebd29
+  ExportUid: 00000000-0000-0000-0000-000000000000
+  PackagePolicy: CanBeUnpacked
+  ScriptInputsHidden:
+    bitmoji: false
+    foreArmDeg: false
+    kneeDeg: false
+    seatHeightCm: false
+    thighDeg: false
+    typingDeg: false
+    typingSpeed: false
+    upperArmDeg: false
+  ScriptTypesHidden:
+    {}
+  ReadMe: !<reference> 00000000-0000-0000-0000-000000000000
+  DeclarationFile: !<reference> 00000000-0000-0000-0000-000000000000
+  Tags:
+    []
+  Attachments:
+    []
+  DefaultScriptInputs:
+    - bitmoji: !<reference.SceneObject> 00000000-0000-0000-0000-000000000000
+      seatHeightCm: !<float> 46.000000
+      thighDeg: !<float> -82.000000
+      kneeDeg: !<float> 80.000000
+      upperArmDeg: !<float> -62.000000
+      foreArmDeg: !<float> 48.000000
+      typingSpeed: 6.500000
+      typingDeg: !<float> 5.000000
+  ScriptTypes:
+    -
+      {}
+  InputLines:
+    - '// @input SceneObject bitmoji {"hint":"Object carrying the Bitmoji3D component. The rig is searched for underneath it."}'
+    - '// @input float seatHeightCm = 46 {"hint":"Height of the chair seat above the floor, in cm. The avatar is dropped so its hips land here."}'
+    - '// @input float thighDeg = -82 {"hint":"Thigh rotation in degrees. Negative swings the knees forward."}'
+    - '// @input float kneeDeg = 80 {"hint":"Knee bend in degrees."}'
+    - '// @input float upperArmDeg = -62 {"hint":"Upper arm rotation in degrees. Negative brings the elbows down and forward."}'
+    - '// @input float foreArmDeg = 48 {"hint":"Forearm bend in degrees, reaching towards the keyboard."}'
+    - '// @input float typingSpeed = 6.5 {"hint":"Typing strokes per second."}'
+    - '// @input float typingDeg = 5 {"hint":"How far the forearms travel per stroke, in degrees."}'

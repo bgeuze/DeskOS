@@ -11,6 +11,7 @@ import {BackPlate} from "SpectaclesUIKit.lspkg/Scripts/BackPlate"
 // ── Assets ───────────────────────────────────────────────────────────────────
 const imageMaterial = requireAsset("../Materials/ImageMaterial.mat") as Material
 
+const ICON_BRAND = requireAsset("../Icons/folder.png") as Texture
 const ICON_SEARCHING = requireAsset("../Icons/my_location.png") as Texture
 const ICON_READY = requireAsset("../Icons/check_circle.png") as Texture
 
@@ -53,7 +54,7 @@ function applyTextRole(t: Text, role: TextRole, distanceCm: number = 110): void 
 
 // ── Layout constants (cm) ────────────────────────────────────────────────────
 const PANEL_W = 30
-const PANEL_H = 9.5
+const PANEL_H = 12.8
 const PAD = 1.6
 const INNER_W = PANEL_W - PAD * 2
 
@@ -135,6 +136,21 @@ export class DeskOSHintUI extends BaseScriptComponent {
     col.paddingBottom = PAD
     col.paddingLeft = PAD
     col.paddingRight = PAD
+
+    // Row 0 — brand mark. This card is the first thing the Lens shows and the
+    // last thing standing between the user and the desk, so it is where the
+    // product gets to say its own name.
+    this.flexChild(content, {w: INNER_W, h: 2.6}, (rowObj) => {
+      const row = this.flexRow(rowObj, INNER_W, 2.6, {
+        justify: FlexJustify.Center,
+        align: FlexAlign.Center,
+        gap: 0.35
+      })
+      // Tight width on the wordmark: a generous box centres the text inside
+      // itself and leaves the folder stranded away from the name it belongs to.
+      this.addIcon(row, ICON_BRAND, 2.0, COLOR_ACCENT)
+      this.addRowText(row, "DeskOS", "Subheadline", COLOR_ACCENT, 3.6)
+    })
 
     // Row 1 — status glyph + headline.
     this.flexChild(content, {w: INNER_W, h: 3.4}, (rowObj) => {

@@ -25,6 +25,17 @@ export enum SurfaceReject {
   TooFar = "too_far"
 }
 
+/**
+ * The part of a surface hit this class actually reads.
+ *
+ * Both WorldQueryHitTestResult (device) and RayCastHit (editor mock) satisfy
+ * this shape, which is what lets a single classify() judge both.
+ */
+interface SurfaceHit {
+  position: vec3
+  normal: vec3
+}
+
 export interface SurfaceSample {
   /** True only when every acceptance test passed. */
   valid: boolean
@@ -67,6 +78,12 @@ export class DeskOSSurfacePlacer {
 
   /** Guards against stacking hit tests faster than WorldQuery can answer them. */
   private inFlight = false
+
+  /**
+   * Physics probe used by the editor mock to hit the preview room for real.
+   * Created on first use so a device build never allocates one.
+   */
+  private geometryProbe: Probe | null = null
 
   constructor(smoothing: boolean = true) {
     const options = HitTestSessionOptions.create()
@@ -118,12 +135,35 @@ export class DeskOSSurfacePlacer {
   }
 
   /**
-   * Editor-only stand-in for WorldQuery: intersect the ray with a level plane
-   * EDITOR_DESK_DROP_CM below the camera. Runs the SAME classify() acceptance
-   * rules as a real hit, so what you exercise in Preview is the real state
-   * machine, not a bypass of it.
+   * Editor-only stand-in for WorldQuery.
+   *
+   * Casts against the actual colliders in the scene, so the DemoRoom's desk,
+   * side table, cabinet and floor are all real targets and aiming decides
+   * where the tray lands. Falls back to a flat virtual desk at a fixed drop
+   * when there is nothing to hit, so a bare scene is still demonstrable.
+   *
+   * Either way the result goes through the SAME classify() the device path
+   * uses, so what you exercise in Preview is the real state machine.
    */
   private simulate(rayStart: vec3, rayEnd: vec3, cameraPos: vec3): SurfaceSample {
+    if (this.geometryProbe === null) this.geometryProbe = Physics.createGlobalProbe()
+
+    const hits = this.geometryProbe.rayCastAllSync(rayStart, rayEnd)
+    if (hits !== null && hits.length > 0) {
+      // Hits come back nearest-first, but the nearest is not what we want: the
+      // placement hint card carries an InteractionPlane collider and is parked
+      // in the gaze path, so stopping at hit zero reported "not a flat surface"
+      // no matter where the user aimed. Take the first surface along the ray
+      // that a desk could actually go on.
+      for (let i = 0; i < hits.length; i++) {
+        const candidate = this.classify(hits[i], cameraPos)
+        if (candidate.valid) return candidate
+      }
+      // Nothing placeable along the ray. Report why the nearest one failed, so
+      // aiming at a wall still says "not a flat surface" rather than "no hit".
+      return this.classify(hits[0], cameraPos)
+    }
+
     const planeY = cameraPos.y - EDITOR_DESK_DROP_CM
     const dir = rayEnd.sub(rayStart)
     if (Math.abs(dir.y) < 1e-5) return REJECTED
@@ -144,7 +184,7 @@ export class DeskOSSurfacePlacer {
   }
 
   /** Apply the horizontal-surface and range filters to a raw WorldQuery result. */
-  private classify(result: WorldQueryHitTestResult | null, cameraPos: vec3): SurfaceSample {
+  private classify(result: SurfaceHit | null, cameraPos: vec3): SurfaceSample {
     if (result === null || isNull(result)) return REJECTED
 
     const position = result.position

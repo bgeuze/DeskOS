@@ -36,8 +36,31 @@ export const MAX_PLACE_DISTANCE_CM = 400
 // The UI panel is authored in ordinary panel-local XY, so it is parented with a
 // -90 deg X rotation that maps panel +Z (its normal) onto anchor +Y.
 
-/** How far the tray floats above the physical surface (cm) — reads as "resting on". */
-export const TRAY_SURFACE_LIFT = 0.35
+/**
+ * How far the tray floats above the physical surface (cm).
+ *
+ * Was 0.35, which is thinner than the UI stacked on top of it: the folder cards
+ * sit ~0.12 cm above the mat and their labels a fraction above that. Any
+ * surface the tray is placed on therefore passed straight THROUGH the stack,
+ * slicing off the icons and titles while leaving the card faces — and which
+ * side won depended on the viewing angle, so the labels came and went as the
+ * camera moved. Proven by rendering the tray in isolation, where every label is
+ * present and correct.
+ *
+ * 2 cm clears the whole stack with room to spare and still reads as resting on
+ * the desk rather than hovering over it.
+ */
+export const TRAY_SURFACE_LIFT = 2.0
+
+/**
+ * Tilt of the tray towards the user, in degrees. 0 lies flat on the desk.
+ *
+ * Flat is the honest thing for a surface UI and the wrong thing for reading:
+ * every label is viewed at a glancing angle and the folders foreshorten into
+ * slivers. Propping the panel up like a Stream Deck turns the whole tray
+ * towards the face for the cost of a back edge that stands off the desk.
+ */
+export const TRAY_TILT_DEG = 25
 
 /** Desk-anchor-local position of the drag handle, on the near edge of the tray. */
 export const HANDLE_ANCHOR_POS = new vec3(0, 0, 16.0)

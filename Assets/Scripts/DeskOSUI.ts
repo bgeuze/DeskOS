@@ -26,6 +26,7 @@ const ICON_TEXT = requireAsset("../Icons/description.png") as Texture
 const ICON_IMAGE = requireAsset("../Icons/image.png") as Texture
 const ICON_VIDEO = requireAsset("../Icons/play_arrow.png") as Texture
 const ICON_AUDIO = requireAsset("../Icons/graphic_eq.png") as Texture
+const TEX_CARD_GLOW = requireAsset("../Icons/card_glow.png") as Texture
 
 // ── Typography: the single source of truth for text size + weight ────────────
 //
@@ -35,7 +36,7 @@ const ICON_AUDIO = requireAsset("../Icons/graphic_eq.png") as Texture
 // lies flat on a real desk, so it is read from much closer than 110 cm — every
 // role is applied at DESK_DIST, which scales the em-square down proportionally
 // so the ANGULAR size stays right.
-const FONT_SIZE_SCALE = 1.0 // 1.0 = SnapOS system-font metrics (no custom font baked).
+const FONT_SIZE_SCALE = 1.2 // 1.0 = SnapOS system-font metrics; raised for legibility on a flat desk.
 
 type TextRole =
   | "Title1"
@@ -81,7 +82,7 @@ function textWidthCm(text: string, role: TextRole, distanceCm: number = 110): nu
 // The mat is a workspace the folders move around inside, not a shelf that just
 // holds them in a row — so it is sized for rearranging, not for a tight fit.
 const TRAY_W = 58
-const TRAY_H = 34
+export const TRAY_H = 34
 const PAD = 2.0
 const INNER_W = TRAY_W - PAD * 2 // 38
 
@@ -94,7 +95,17 @@ const ROW_GAP = 1.4
 // 110 cm UI focal plane. Every role is applied at this distance.
 const DESK_DIST = 70
 
-const LAYOUT_Z_LIFT = 0.02
+/**
+ * Separation between stacked layout levels, in cm.
+ *
+ * Was 0.02 — two tenths of a millimetre. Enough to order the layers on paper,
+ * nowhere near enough to survive a depth buffer at 80 cm viewed from a glancing
+ * angle, where the depth gradient across a single pixel swamps it. The labels
+ * came out as slivers of glyph: parts of a character winning the depth test and
+ * parts losing it. Ten times the separation costs under a centimetre across the
+ * whole stack and puts the question beyond doubt.
+ */
+const LAYOUT_Z_LIFT = 0.2
 const CONTENT_Z_OFFSET = 0.08
 const CARD_CONTENT_Z = 0.12
 
@@ -127,7 +138,13 @@ const MAT_CORNER = 2.4
  * brightens as the card rises.
  */
 const GLOW_COLOR = new vec4(0.35, 0.85, 0.92, 0.85)
-const GLOW_MAX_SPREAD_CM = 2.6
+const GLOW_MAX_SPREAD_CM = 1.6
+
+/** Below this the halo is switched off rather than merely faded to nothing. */
+const GLOW_MIN_VISIBLE = 0.02
+
+/** How far the halo sits behind the card it belongs to (cm). */
+const GLOW_BEHIND = 0.06
 
 /** Local Z of the folder layer and its parts (mat-local +Z is the surface normal). */
 const FOLDERS_Z = 0.6
@@ -180,6 +197,15 @@ const KIND_SIZE: Record<ContentKind, vec2> = {
   video: new vec2(8.4, 6.0),
   audio: new vec2(7.6, 5.2)
 }
+/**
+ * How far the photo sits above centre inside an image chip (cm).
+ *
+ * A tenth of the chip's 6.6 cm height. The thumbnail was centred, which left it
+ * crowding the name along the bottom edge once fitToTexture gave a portrait
+ * shot its full height. The name itself does not move.
+ */
+const IMAGE_THUMB_LIFT = 0.66
+
 const KIND_ACCENT: Record<ContentKind, vec4> = {
   text: new vec4(0.84, 0.88, 0.95, 1),
   image: new vec4(1.0, 0.72, 0.34, 1),
@@ -247,6 +273,9 @@ const CONTENTS: Record<string, ContentDef[]> = {
     {kind: "image", name: "", meta: "", reserve: true},
     {kind: "image", name: "", meta: "", reserve: true},
     {kind: "text", name: "", meta: "", reserve: true},
+    {kind: "text", name: "", meta: "", reserve: true},
+    {kind: "text", name: "", meta: "", reserve: true},
+    {kind: "image", name: "", meta: "", reserve: true},
     {kind: "audio", name: "", meta: "", reserve: true},
     {kind: "audio", name: "", meta: "", reserve: true},
     {kind: "audio", name: "", meta: "", reserve: true}
@@ -260,6 +289,9 @@ const CONTENTS: Record<string, ContentDef[]> = {
     {kind: "image", name: "", meta: "", reserve: true},
     {kind: "image", name: "", meta: "", reserve: true},
     {kind: "text", name: "", meta: "", reserve: true},
+    {kind: "text", name: "", meta: "", reserve: true},
+    {kind: "text", name: "", meta: "", reserve: true},
+    {kind: "image", name: "", meta: "", reserve: true},
     {kind: "audio", name: "", meta: "", reserve: true},
     {kind: "audio", name: "", meta: "", reserve: true},
     {kind: "audio", name: "", meta: "", reserve: true}
@@ -285,6 +317,9 @@ const CONTENTS: Record<string, ContentDef[]> = {
     {kind: "image", name: "", meta: "", reserve: true},
     {kind: "image", name: "", meta: "", reserve: true},
     {kind: "text", name: "", meta: "", reserve: true},
+    {kind: "text", name: "", meta: "", reserve: true},
+    {kind: "text", name: "", meta: "", reserve: true},
+    {kind: "image", name: "", meta: "", reserve: true},
     {kind: "audio", name: "", meta: "", reserve: true},
     {kind: "audio", name: "", meta: "", reserve: true},
     {kind: "audio", name: "", meta: "", reserve: true}
@@ -304,6 +339,15 @@ const VIEWER_W = 32
 const VIEWER_H = 20
 /** Height of the standing viewer's centre above the mat (cm). */
 const VIEWER_HEIGHT = 12
+
+/**
+ * How far the audio transport sits above where it was authored (cm).
+ *
+ * The body is parented 2.2 cm below the panel centre, so the Play button's
+ * centre landed at -9.1 with a half-height of 1.4 — its bottom edge fell 0.5 cm
+ * past the panel, which only shows up once a memo is actually opened.
+ */
+const AUDIO_ROW_LIFT = 1.6
 /** How far behind the file the viewer stands, away from the user (cm). */
 const VIEWER_BACK_OFFSET = 8
 /** Viewers stand up and lean back slightly, the way a monitor does. */
@@ -497,7 +541,7 @@ interface CardHandles {
   def: FolderDef
   root: SceneObject
   button: Button
-  glow: RoundedRectangle
+  glow: Image
   glowObj: SceneObject
   /** Interaction state — highest priority wins for lift / scale / colour. */
   hovered: boolean
@@ -575,6 +619,15 @@ interface ContentHandles {
   nameText: Text
   /** Image kind only: the swatch that becomes a real thumbnail. */
   thumb: RoundedRectangle | null
+  /**
+   * The kind glyph, or null for kinds that draw their own likeness.
+   *
+   * It is a PLACEHOLDER, not a badge: it says what a chip holds until the chip
+   * can show it. Audio never gets one — its waveform already is the picture,
+   * and drawing the graphic_eq glyph above it put the same waveform on the
+   * chip twice. An image chip loses its glyph the moment a real photo lands.
+   */
+  icon: SceneObject | null
   /** Mat-local spot where the current grab began, for telling a drag from a tap. */
   grabStartX: number
   grabStartY: number
@@ -931,18 +984,41 @@ export class DeskOSUI extends BaseScriptComponent {
 
     // Every glow is created before any card so the hierarchy DFS paints all
     // glows behind all cards — including a card dragged over a neighbour.
-    const glows: {rr: RoundedRectangle; so: SceneObject}[] = []
+    const glows: {rr: Image; so: SceneObject}[] = []
     for (let i = 0; i < FOLDERS.length; i++) {
       const so = this.obj(
         folders,
         "Glow_" + FOLDERS[i].id,
         new vec3(FOLDER_HOME_X[i], FOLDER_HOME_Y, GLOW_Z)
       )
-      const rr = so.createComponent(RoundedRectangle.getTypeName()) as RoundedRectangle
-      rr.size = new vec2(CARD_W, CARD_H)
-      rr.cornerRadius = CARD_CORNER
-      rr.backgroundColor = GLOW_COLOR
-      rr.opacity = 0
+      // A drawn shape rather than a RoundedRectangle.
+      //
+      // RoundedRectangle bakes its corners into geometry when the component is
+      // built: `size` can be changed afterwards but `cornerRadius` cannot. Every
+      // attempt to animate the halo therefore stretched the plate while its
+      // corners stayed at the card's tighter radius, which is the square blue
+      // wedge that survived four different radius formulas — none of them were
+      // ever reaching the geometry.
+      //
+      // card_glow.png is 12.6 x 14.6 cm — the card plus 0.8 cm on every side —
+      // drawn with a 1.2 cm radius rather than the 2.4 a parallel
+      // offset would call for. The parallel figure is the correct one on paper
+      // and the wrong one on screen: it rounds the halo more than the button it
+      // belongs to, and the mismatch is what you notice. The final value was
+      // settled by eye against the card, not derived. Tinted white in the file
+      // so GLOW_COLOR does the colouring.
+      const rr = so.createComponent("Component.Image") as Image
+      const mat = imageMaterial.clone() // CLONE — never share across textures
+      mat.mainPass.baseTex = TEX_CARD_GLOW
+      mat.mainPass.depthTest = false
+      mat.mainPass.depthWrite = false
+      rr.clearMaterials()
+      rr.addMaterial(mat)
+      rr.mainPass.baseColor = new vec4(GLOW_COLOR.x, GLOW_COLOR.y, GLOW_COLOR.z, 0)
+      // ImageHandler reads localScale as size.
+      so.getTransform().setLocalScale(
+        new vec3(CARD_W + GLOW_MAX_SPREAD_CM, CARD_H + GLOW_MAX_SPREAD_CM, 1)
+      )
       glows.push({rr, so})
     }
 
@@ -979,7 +1055,16 @@ export class DeskOSUI extends BaseScriptComponent {
     const so = this.obj(parent, label, pos)
     const t = so.createComponent("Component.Text") as Text
     t.text = ""
-    t.depthTest = true
+    // depthTest OFF, deliberately. Every text object here sits at local (0,0,0)
+    // of its backing card, so the glyphs are EXACTLY coplanar with the card
+    // surface. Depth-testing two coplanar surfaces is a coin toss decided by
+    // viewing angle — which is why the labels were invisible from most angles
+    // and reappeared from one narrow one. Hierarchy order already draws a child
+    // after its parent, so turning the test off puts the text on its card and
+    // keeps it there. The cost is that a label would draw through the desk if
+    // you filmed from underneath.
+    t.depthTest = false
+    t.twoSided = true
     applyTextRole(t, role, DESK_DIST)
     t.textFill.color = color
     t.horizontalAlignment = HorizontalAlignment.Center
@@ -1114,7 +1199,71 @@ export class DeskOSUI extends BaseScriptComponent {
   ): boolean {
     const card = this.cardById(this.titleCaseSlug(folderSlug))
     if (card === null) return false
+    return this.seatInto(card, kind, name, meta, body, token)
+  }
 
+  /**
+   * Move an in-flight capture into a reserve of a different kind.
+   *
+   * A chip's kind is fixed by the reserve it landed in, but the kind is not
+   * known until the model has read the frame: a photo of a sticky note should
+   * end up as a text file, not as a picture of one. So the capture lands as an
+   * image for the instant feedback, and is re-seated here once we know better.
+   *
+   * The old chip is only released after the new seat is secured. Parking first
+   * and failing to re-seat would drop the capture on the floor.
+   */
+  reseatCapture(
+    token: string,
+    kind: ContentKind,
+    name: string,
+    meta: string,
+    body: string[] | null
+  ): boolean {
+    let chip: ContentHandles | null = null
+    let card: CardHandles | null = null
+    for (const c of this.cards) {
+      for (const item of c.contents) {
+        if (item.captureToken !== token) continue
+        chip = item
+        card = c
+      }
+    }
+    if (chip === null || card === null) return false
+    if (chip.def.kind === kind) return true
+
+    let free: ContentHandles | null = null
+    for (const other of card.contents) {
+      if (other.def.kind !== kind) continue
+      if (other.delay < Number.MAX_VALUE) continue
+      free = other
+      break
+    }
+    if (free === null) return false
+
+    this.park(chip)
+    this.reflowRing(card)
+    return this.seatInto(card, kind, name, meta, body, token)
+  }
+
+  /** Return a chip to the reserve pool. */
+  private park(chip: ContentHandles): void {
+    chip.captureToken = ""
+    chip.root.enabled = false
+    chip.tetherObj.enabled = false
+    chip.delay = Number.MAX_VALUE
+    chip.def.name = ""
+    if (chip.nameText) chip.nameText.text = ""
+  }
+
+  private seatInto(
+    card: CardHandles,
+    kind: ContentKind,
+    name: string,
+    meta: string,
+    body: string[] | null,
+    token: string
+  ): boolean {
     let seat: ContentHandles | null = null
     for (const chip of card.contents) {
       if (chip.def.kind !== kind) continue
@@ -1325,6 +1474,9 @@ export class DeskOSUI extends BaseScriptComponent {
         chip.thumb.useTexture = true
         chip.thumb.texture = texture
         chip.thumb.opacity = 1
+        // The glyph was standing in for exactly this. Left up, it collides with
+        // the photo as soon as fitToTexture gives a portrait image its height.
+        if (chip.icon !== null) chip.icon.enabled = false
       }
     }
   }
@@ -1595,7 +1747,7 @@ export class DeskOSUI extends BaseScriptComponent {
         new vec2(0.34, hgt),
         KIND_ACCENT.audio,
         0.17,
-        new vec3(-(VIEWER_W - 9) / 2 + i * step, -0.6, 0.08),
+        new vec3(-(VIEWER_W - 9) / 2 + i * step, -0.6 + AUDIO_ROW_LIFT, 0.08),
         i < bars * 0.38 ? 0.95 : 0.4
       )
     }
@@ -1603,17 +1755,24 @@ export class DeskOSUI extends BaseScriptComponent {
     // Transport. The progress bar is driven from the player rather than faked,
     // so what the user sees is what is actually being heard.
     const track = VIEWER_W - 9
-    this.plate(c, new vec2(track, 0.42), KIND_ACCENT.audio, 0.21, new vec3(0, -4.6, 0.08), 0.28)
+    this.plate(
+      c,
+      new vec2(track, 0.42),
+      KIND_ACCENT.audio,
+      0.21,
+      new vec3(0, -4.6 + AUDIO_ROW_LIFT, 0.08),
+      0.28
+    )
     refs.fill = this.plate(
       c,
       new vec2(0.01, 0.42),
       KIND_ACCENT.audio,
       0.21,
-      new vec3(-track / 2, -4.6, 0.1),
+      new vec3(-track / 2, -4.6 + AUDIO_ROW_LIFT, 0.1),
       0.95
     )
 
-    const playObj = this.obj(c, "Play", new vec3(-track / 2 + 2.6, -6.9, 0.12))
+    const playObj = this.obj(c, "Play", new vec3(-track / 2 + 2.6, -6.9 + AUDIO_ROW_LIFT, 0.12))
     const playBtn = playObj.createComponent(Button.getTypeName()) as Button
     playBtn.size = new vec3(5.2, 2.8, 1)
     refs.play = playBtn
@@ -1630,7 +1789,7 @@ export class DeskOSUI extends BaseScriptComponent {
     refs.elapsed = this.freeText(
       c,
       "Elapsed",
-      new vec3(track / 2 - 3.0, -6.9, 0.12),
+      new vec3(track / 2 - 3.0, -6.9 + AUDIO_ROW_LIFT, 0.12),
       "Caption",
       COLOR_SECONDARY,
       6.0
@@ -1679,7 +1838,7 @@ export class DeskOSUI extends BaseScriptComponent {
     const img = so.createComponent("Component.Image") as Image
     const mat = imageMaterial.clone() // CLONE — never share across textures
     mat.mainPass.baseTex = texture
-    mat.mainPass.depthTest = true
+    mat.mainPass.depthTest = false
     mat.mainPass.depthWrite = false
     img.clearMaterials()
     img.addMaterial(mat)
@@ -1800,9 +1959,14 @@ export class DeskOSUI extends BaseScriptComponent {
 
       const root = this.obj(parent, "Content_" + card.def.id + "_" + def.name)
       const manipOut: InteractableManipulation[] = []
-      const refs: {nameText: Text | null; thumb: RoundedRectangle | null} = {
+      const refs: {
+        nameText: Text | null
+        thumb: RoundedRectangle | null
+        icon: SceneObject | null
+      } = {
         nameText: null,
-        thumb: null
+        thumb: null,
+        icon: null
       }
       // Cloned, never shared: cloud content rewrites name/meta/body per chip and
       // must not mutate the module-level sample list.
@@ -1836,6 +2000,7 @@ export class DeskOSUI extends BaseScriptComponent {
         tetherObj,
         nameText: refs.nameText as Text,
         thumb: refs.thumb,
+        icon: refs.icon,
         grabStartX: 0,
         grabStartY: 0,
         dragged: false,
@@ -1853,9 +2018,14 @@ export class DeskOSUI extends BaseScriptComponent {
       this.bindContent(item, btn, manipOut[0])
 
       if (def.reserve === true) {
-        item.delay = Number.MAX_VALUE
-        item.def.name = ""
-        if (item.nameText) item.nameText.text = ""
+        // Park it properly. Setting delay alone only takes a reserve out of the
+        // OPEN animation — the chip and its tether stay enabled, sitting on the
+        // folder card at their build pose. Every chip in Folders is drawn AFTER
+        // the three cards, so nine enabled reserves per folder were painting
+        // over the card faces: no icon, no title, nothing. It read as a text
+        // bug because text is what you notice missing, but the icons were gone
+        // too. Same treatment the runtime park path already used.
+        this.park(item)
       }
     }
     this.reflowRing(card)
@@ -1888,7 +2058,7 @@ export class DeskOSUI extends BaseScriptComponent {
     root: SceneObject,
     def: ContentDef,
     out: InteractableManipulation[],
-    refs: {nameText: Text | null; thumb: RoundedRectangle | null}
+    refs: {nameText: Text | null; thumb: RoundedRectangle | null; icon: SceneObject | null}
   ): Button {
     const size = KIND_SIZE[def.kind]
     const accent = KIND_ACCENT[def.kind]
@@ -1909,16 +2079,22 @@ export class DeskOSUI extends BaseScriptComponent {
     manip.setCanRotate(false)
     manip.setCanScale(false)
 
-    const iconObj = this.obj(root, "Icon", new vec3(0, h / 2 - 1.5, 0.08))
-    const img = iconObj.createComponent("Component.Image") as Image
-    const mat = imageMaterial.clone() // CLONE — never share across textures
-    mat.mainPass.baseTex = KIND_ICON[def.kind]
-    mat.mainPass.depthTest = true
-    mat.mainPass.depthWrite = false
-    img.clearMaterials()
-    img.addMaterial(mat)
-    img.mainPass.baseColor = accent
-    iconObj.getTransform().setLocalScale(new vec3(2.2, 2.2, 1))
+    // Audio draws its own waveform below, and the audio glyph IS a waveform —
+    // one chip showing the same mark twice. Everything else keeps the glyph as
+    // a stand-in until it has something truer to show.
+    if (def.kind !== "audio") {
+      const iconObj = this.obj(root, "Icon", new vec3(0, h / 2 - 1.5, 0.08))
+      const img = iconObj.createComponent("Component.Image") as Image
+      const mat = imageMaterial.clone() // CLONE — never share across textures
+      mat.mainPass.baseTex = KIND_ICON[def.kind]
+      mat.mainPass.depthTest = false
+      mat.mainPass.depthWrite = false
+      img.clearMaterials()
+      img.addMaterial(mat)
+      img.mainPass.baseColor = accent
+      iconObj.getTransform().setLocalScale(new vec3(2.2, 2.2, 1))
+      refs.icon = iconObj
+    }
 
     if (def.kind === "text") {
       // Ruled lines, last one short — reads as a page of prose.
@@ -1933,7 +2109,7 @@ export class DeskOSUI extends BaseScriptComponent {
         new vec2(w * 0.7, h * 0.32),
         accent,
         0.5,
-        new vec3(0, -0.1, 0.06),
+        new vec3(0, -0.1 + IMAGE_THUMB_LIFT, 0.06),
         0.5
       )
     } else if (def.kind === "video") {
@@ -1968,7 +2144,8 @@ export class DeskOSUI extends BaseScriptComponent {
     const nameObj = this.obj(root, "Name", new vec3(0, -h / 2 + 1.0, 0.08))
     const t = nameObj.createComponent("Component.Text") as Text
     t.text = def.name
-    t.depthTest = true
+    t.depthTest = false
+    t.twoSided = true
     applyTextRole(t, "Caption", DESK_DIST)
     t.textFill.color = COLOR_PRIMARY
     t.horizontalAlignment = HorizontalAlignment.Center
@@ -2054,7 +2231,7 @@ export class DeskOSUI extends BaseScriptComponent {
     parent: SceneObject,
     def: FolderDef,
     home: vec3,
-    glow: RoundedRectangle,
+    glow: Image,
     glowObj: SceneObject
   ): void {
     const card = this.obj(parent, "Card_" + def.id, home)
@@ -2079,6 +2256,24 @@ export class DeskOSUI extends BaseScriptComponent {
     // updateFolders() re-asserts that every frame regardless.
     manip.setCanRotate(false)
     manip.setCanScale(false)
+
+    // The lid hinges about the card's far edge: the pivot sits on that edge and
+    // the plate hangs back from it, so rotating the pivot about local X swings
+    // the plate up and away like the cover of a folder. It sits just BEHIND the
+    // card face while closed, so the resting card looks exactly as before.
+    //
+    // Built BEFORE the card content, and that ordering is the whole point. This
+    // Canvas sorts by hierarchy, so a later sibling paints over an earlier one
+    // no matter where it sits in Z — and Text writes no depth of its own to
+    // defend with. Built afterwards, the lid covered every label on the card:
+    // head-on the titles were simply gone, and they reappeared from the side
+    // only because the 0.18 cm offset let them clear the lid's silhouette.
+    const lidPivot = this.obj(card, "LidPivot", new vec3(0, CARD_H / 2, LID_Z))
+    const lidPlate = this.obj(lidPivot, "LidPlate", new vec3(0, -CARD_H / 2, 0))
+    const lid = lidPlate.createComponent(RoundedRectangle.getTypeName()) as RoundedRectangle
+    lid.size = new vec2(CARD_W, CARD_H)
+    lid.cornerRadius = CARD_CORNER
+    lid.backgroundColor = LID_FILL
 
     // Card face content: icon over title over subtitle.
     const inner = this.obj(card, "CardInner", new vec3(0, 0, CARD_CONTENT_Z))
@@ -2110,17 +2305,6 @@ export class DeskOSUI extends BaseScriptComponent {
 
     this.addColumnText(inner, def.title, "Headline2", COLOR_PRIMARY, 2.2)
     this.addColumnText(inner, def.subtitle, "Caption", COLOR_SECONDARY, 1.6)
-
-    // The lid hinges about the card's far edge: the pivot sits on that edge and
-    // the plate hangs back from it, so rotating the pivot about local X swings
-    // the plate up and away like the cover of a folder. It sits just BEHIND the
-    // card face while closed, so the resting card looks exactly as before.
-    const lidPivot = this.obj(card, "LidPivot", new vec3(0, CARD_H / 2, LID_Z))
-    const lidPlate = this.obj(lidPivot, "LidPlate", new vec3(0, -CARD_H / 2, 0))
-    const lid = lidPlate.createComponent(RoundedRectangle.getTypeName()) as RoundedRectangle
-    lid.size = new vec2(CARD_W, CARD_H)
-    lid.cornerRadius = CARD_CORNER
-    lid.backgroundColor = LID_FILL
 
     const handles: CardHandles = {
       def,
@@ -2257,18 +2441,34 @@ export class DeskOSUI extends BaseScriptComponent {
         if (moved > DRAG_SELECT_THRESHOLD) card.dragged = true
       }
 
-      // Glow stays down on the mat and brightens/spreads as the card rises.
-      // The folder that would claim a dragged file lights up as though lifted,
-      // so the drop target is legible before the user commits to it.
+      // The folder that would claim a dragged file lights up, so the drop target
+      // is legible before the user commits to it.
       card.adoptGlow +=
         ((card.def.id === adoptId ? 1 : 0) - card.adoptGlow) * Math.min(1, dt * ADOPT_GLOW_SPEED)
 
       const t = Math.max(card.adoptGlow, Math.min(1, card.lift / LIFT_GRABBED))
-      const spread = 1 + (GLOW_MAX_SPREAD_CM / CARD_W) * t
       const sh = card.glowObj.getTransform()
-      sh.setLocalPosition(new vec3(x, y, GLOW_Z))
-      sh.setLocalScale(new vec3(spread, spread, 1))
-      card.glow.opacity = t
+
+      // Switched off outright rather than left at zero opacity. A transparent
+      // plate still put a blue hairline along the bottom of every folder at
+      // rest, which is the first thing you see and the last thing you want.
+      card.glowObj.enabled = t > GLOW_MIN_VISIBLE
+      if (card.glowObj.enabled) {
+        // Fade only — no scaling. localScale IS the Image's size, so touching it
+        // would resize the halo rather than animate it, and a halo that grows
+        // out from under the card reads as a plate sliding loose.
+        card.glow.mainPass.baseColor = new vec4(
+          GLOW_COLOR.x,
+          GLOW_COLOR.y,
+          GLOW_COLOR.z,
+          GLOW_COLOR.w * t
+        )
+
+        // Directly behind the card and rising with it. Parked on the mat it
+        // slid out from under a lifted card and read as a misaligned plate
+        // rather than as light coming off the thing it belongs to.
+        sh.setLocalPosition(new vec3(x, y, CARD_BASE_Z + card.lift - GLOW_BEHIND))
+      }
 
       this.updateOpenState(card, dt, x, y)
     }
@@ -2760,7 +2960,8 @@ export class DeskOSUI extends BaseScriptComponent {
     const so = this.obj(parent, "RowText")
     const t = so.createComponent("Component.Text") as Text
     t.text = text
-    t.depthTest = true
+    t.depthTest = false
+    t.twoSided = true
     applyTextRole(t, role, DESK_DIST)
     t.textFill.color = color
     t.horizontalAlignment = HorizontalAlignment.Center
@@ -2784,7 +2985,8 @@ export class DeskOSUI extends BaseScriptComponent {
     const so = this.obj(parent, "ColText")
     const t = so.createComponent("Component.Text") as Text
     t.text = text
-    t.depthTest = true
+    t.depthTest = false
+    t.twoSided = true
     applyTextRole(t, role, DESK_DIST)
     t.textFill.color = color
     t.horizontalAlignment = HorizontalAlignment.Center
@@ -2804,7 +3006,7 @@ export class DeskOSUI extends BaseScriptComponent {
     const img = so.createComponent("Component.Image") as Image
     const mat = imageMaterial.clone() // CLONE — never share across textures
     mat.mainPass.baseTex = texture
-    mat.mainPass.depthTest = true
+    mat.mainPass.depthTest = false
     mat.mainPass.depthWrite = false // Images: test ON, write OFF
     img.clearMaterials()
     img.addMaterial(mat)

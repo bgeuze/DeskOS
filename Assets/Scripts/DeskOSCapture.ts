@@ -1,4 +1,5 @@
 import {ContentKind} from "./DeskOSTypes"
+import {wait} from "./DeskOSAsync"
 import {DeskOSCloud} from "./DeskOSCloud"
 
 /**
@@ -8,9 +9,13 @@ import {DeskOSCloud} from "./DeskOSCloud"
  * by DeskOS.ts; it knows nothing about the UI beyond handing back the file it
  * created.
  *
- * Neither path can run in Lens Studio preview: the camera is device-only and
- * Snap Cloud networking is wearable-only, so every method here reports its
- * refusal rather than failing silently.
+ * The camera has an editor stand-in. `requestCamera()` does deliver frames in
+ * Preview, but what it delivers is the SIMULATOR'S backdrop — the grid and
+ * wallpaper of the interactive preview scene — not anything the Lens draws.
+ * Photographing a sticky note that only exists as Lens geometry therefore
+ * produced a picture with no note in it. In the editor we render the scene into
+ * a RenderTarget with a second camera and read that instead, which is the only
+ * way the capture feature is demonstrable without hardware.
  */
 
 const cameraModule = require("LensStudio:CameraModule") as CameraModule
@@ -30,6 +35,9 @@ const VOICE_SAMPLE_RATE = 16000
  */
 const CAPTURE_DIMENSION = 720
 
+/** How long the stand-in camera is left on before its target is read. */
+const STAND_IN_WARMUP_S = 0.2
+
 /** One frozen frame, encoded once and usable by both consumers. */
 export interface CapturedFrame {
   /** For Gemini, which takes image bytes inline as base64. */
@@ -48,6 +56,10 @@ export class DeskOSCapture {
   private frames: Float32Array[] = []
   private sampleCount = 0
   private micControl: MicrophoneAudioProvider | null = null
+
+  /** Editor stand-in: a camera that renders the scene into a texture on demand. */
+  private standInCamera: SceneObject | null = null
+  private standInTexture: Texture | null = null
 
   constructor(private cloud: DeskOSCloud) {}
 
@@ -98,8 +110,27 @@ export class DeskOSCapture {
     this.framesSeen = 0
   }
 
+  /**
+   * Supply the preview stand-in. Called only from the editor path; on device
+   * the real camera is the only source and this is never wired.
+   */
+  useEditorStandIn(camera: SceneObject | null, target: Texture | null): void {
+    if (camera === null || target === null) {
+      print("[DeskOSCapture] No preview capture rig wired — photos will show the simulator backdrop.")
+      return
+    }
+    this.standInCamera = camera
+    this.standInTexture = target
+    // Off until a photo is actually taken. Rendering the scene twice every
+    // frame roughly doubles the draw calls, and the capture needs exactly one
+    // good frame.
+    camera.enabled = false
+    print("[DeskOSCapture] Preview capture rig ready.")
+  }
+
   /** True only once the stream has actually delivered something worth copying. */
   isCameraReady(): boolean {
+    if (this.standInTexture !== null) return true
     return this.cameraTexture !== null && this.framesSeen > 0
   }
 
@@ -117,7 +148,8 @@ export class DeskOSCapture {
     }
 
     const started = new Date().getTime()
-    const frozen = (this.cameraTexture as Texture).copyFrame()
+    const frozen = await this.freezeSource()
+    if (frozen === null) return null
     const base64 = await this.encodeJpeg(frozen)
     if (base64 === null) return null
 
@@ -132,6 +164,25 @@ export class DeskOSCapture {
         " KB)."
     )
     return {base64, bytes, texture: frozen}
+  }
+
+  /**
+   * One frozen frame from whichever source this build has.
+   *
+   * The stand-in camera is switched on for a moment, given a couple of frames
+   * to actually draw, copied, and switched off again.
+   */
+  private async freezeSource(): Promise<Texture | null> {
+    const camera = this.standInCamera
+    const target = this.standInTexture
+    if (camera === null || target === null) {
+      return (this.cameraTexture as Texture).copyFrame()
+    }
+    camera.enabled = true
+    await wait(STAND_IN_WARMUP_S)
+    const frozen = target.copyFrame()
+    camera.enabled = false
+    return frozen
   }
 
   /**

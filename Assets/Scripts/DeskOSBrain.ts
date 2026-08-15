@@ -38,6 +38,16 @@ export interface Understanding {
   folderSlug: string
   /** One short clause, shown under the card while it flies to its folder. */
   rationale: string
+  /**
+   * What the capture should BECOME on the desk.
+   *
+   * A photo of a sticky note is not usefully a photo. If the frame is mostly
+   * writing, the useful artefact is the writing — so the model decides, and a
+   * note comes back as "text" with `body` filled in.
+   */
+  kind: "text" | "image"
+  /** Bullet lines, when kind is "text". Empty otherwise. */
+  body: string[]
 }
 
 /**
@@ -65,9 +75,24 @@ const UNDERSTANDING_SCHEMA = {
       description:
         "One clause, under ten words, addressed to the user, explaining the folder choice. " +
         "No leading capital, no full stop. Example: 'matches your other sprint notes'."
+    },
+    kind: {
+      type: "STRING",
+      enum: ["text", "image"],
+      description:
+        "'text' when the frame is mostly writing worth keeping as writing — a sticky note, " +
+        "a whiteboard, a page, a receipt, a hand-drawn list. 'image' for anything else."
+    },
+    body: {
+      type: "ARRAY",
+      items: {type: "STRING"},
+      description:
+        "Only when kind is 'text'. The content transcribed as short bullet lines, one item " +
+        "per line, at most six lines and at most eight words each. Keep dates, times, names " +
+        "and amounts exactly as written. Empty array when kind is 'image'."
     }
   },
-  required: ["title", "meta", "folderSlug", "rationale"]
+  required: ["title", "meta", "folderSlug", "rationale", "kind", "body"]
 }
 
 /** What the user asked the desk to do. */
@@ -174,7 +199,10 @@ export class DeskOSBrain {
     return (
       "You are the filing sense of a spatial desktop worn on AR glasses. The user " +
       "glances at something in the room and pinches; you receive that camera frame.\n\n" +
-      "Decide two things: what to call it, and which folder it belongs in. Read " +
+      "Decide what to call it, which folder it belongs in, and whether it is worth " +
+      "keeping as a picture or as text. A sticky note, whiteboard or page is worth " +
+      "keeping as TEXT: transcribe it into short bullet lines so the user has the " +
+      "appointment, not a photograph of the appointment. Read " +
       "any writing in the frame — a whiteboard of sprint planning should be named " +
       "for what it says, not for being a whiteboard.\n\n" +
       "The folders that exist:\n" +
@@ -217,11 +245,24 @@ export class DeskOSBrain {
       slug = folders[0].slug
     }
 
+    // A note transcribed into nothing is still a photo. Only promote to text
+    // when there is actually text to show, or the desk gains an empty text card.
+    const lines: string[] = []
+    if (Array.isArray(parsed.body)) {
+      for (const line of parsed.body) {
+        const clean = String(line).trim()
+        if (clean.length > 0) lines.push(clean)
+      }
+    }
+    const wantsText = String(parsed.kind) === "text" && lines.length > 0
+
     return {
       title: this.text(parsed.title, "Untitled"),
       meta: this.text(parsed.meta, "Photo"),
       folderSlug: slug,
-      rationale: this.text(parsed.rationale, "filed here for now")
+      rationale: this.text(parsed.rationale, "filed here for now"),
+      kind: wantsText ? "text" : "image",
+      body: wantsText ? lines : []
     }
   }
 

@@ -1,0 +1,48 @@
+- !<AssetImportMetadata/76fc667a-445b-4e6d-8478-83445ec39fb2>
+  ImportedAssetIds:
+    TypeScriptAsset: !<reference> 717715f7-c098-493c-8959-2c21be0ced2d
+  ImporterName: TypeScriptAssetImporter
+  PrimaryAsset: !<reference> 717715f7-c098-493c-8959-2c21be0ced2d
+  PackageType: NotAPackage
+  LegacyPackagePolicy: ~
+  ExtraData:
+    {}
+  AssetDataMap:
+    TypeScriptAsset: !<own> 688cc109-65f5-40d4-b91e-ad0238efe1cb
+  DependentFiles:
+    []
+  ImporterSettings: !<AssetImporterSettings>
+    {}
+  CompressionSettings: !<own> 00000000-0000-0000-0000-000000000000
+- !<TypeScriptAssetData/688cc109-65f5-40d4-b91e-ad0238efe1cb>
+  SvgIcon: ""
+  SetupScript:
+    code: ""
+  Description: ""
+  VersionMajor: 0
+  VersionMinor: 0
+  VersionPatch: 0
+  VersionPrerelease: ""
+  ComponentUid: 9b1e3b39-279b-4918-86c7-6a34fe6c5ebc
+  ExportUid: 00000000-0000-0000-0000-000000000000
+  PackagePolicy: CanBeUnpacked
+  ScriptInputsHidden:
+    camera: false
+    showOnDevice: false
+  ScriptTypesHidden:
+    {}
+  ReadMe: !<reference> 00000000-0000-0000-0000-000000000000
+  DeclarationFile: !<reference> 00000000-0000-0000-0000-000000000000
+  Tags:
+    []
+  Attachments:
+    []
+  DefaultScriptInputs:
+    - showOnDevice: false
+      camera: !<reference.Camera> 00000000-0000-0000-0000-000000000000
+  ScriptTypes:
+    -
+      {}
+  InputLines:
+    - '// @input bool showOnDevice {"hint":"Draw the room on real hardware too. Leave OFF unless you are debugging the set — on Specs this geometry would occlude the real world."}'
+    - '// @input Component.Camera camera {"hint":"The Lens camera. The room anchors itself around wherever this is on the first frame."}'

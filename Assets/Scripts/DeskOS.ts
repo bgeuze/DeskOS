@@ -8,7 +8,8 @@ import {Interactable} from "SpectaclesInteractionKit.lspkg/Components/Interactio
 import {InteractableManipulation} from "SpectaclesInteractionKit.lspkg/Components/Interaction/InteractableManipulation/InteractableManipulation"
 import WorldCameraFinderProvider from "SpectaclesInteractionKit.lspkg/Providers/CameraProvider/WorldCameraFinderProvider"
 
-import {DeskOSUI} from "./DeskOSUI"
+import {wait} from "./DeskOSAsync"
+import {DeskOSUI, TRAY_H} from "./DeskOSUI"
 import {DeskOSHintUI} from "./DeskOSHintUI"
 import {PlacementReticle} from "./PlacementReticle"
 import {DeskOSAudio} from "./DeskOSAudio"
@@ -32,7 +33,8 @@ import {
   projectOntoPlane,
   reticleRotation,
   RETICLE_FOLLOW_SPEED,
-  TRAY_SURFACE_LIFT
+  TRAY_SURFACE_LIFT,
+  TRAY_TILT_DEG
 } from "./DeskOSConfig"
 
 const handlePrefab = requireAsset("../GeneratedMeshes/DeskHandle.glb") as ObjectPrefab
@@ -42,6 +44,30 @@ const internetModule = require("LensStudio:InternetModule") as InternetModule
 
 /** Gap between one file being re-filed and the next, so the move stays readable. */
 const TIDY_STAGGER_MS = 550
+
+/** Seconds counted down before a photo is taken. */
+const CAPTURE_COUNTDOWN = 3
+
+/**
+ * String -> UTF-8 bytes, for uploading a transcribed note as a real .txt.
+ *
+ * Hand-rolled because this runtime has no TextEncoder. Surrogate pairs (emoji
+ * beyond the BMP) would be mangled; note text does not contain them.
+ */
+function utf8Bytes(text: string): Uint8Array {
+  const out: number[] = []
+  for (let i = 0; i < text.length; i++) {
+    const c = text.charCodeAt(i)
+    if (c < 0x80) {
+      out.push(c)
+    } else if (c < 0x800) {
+      out.push(0xc0 | (c >> 6), 0x80 | (c & 0x3f))
+    } else {
+      out.push(0xe0 | (c >> 12), 0x80 | ((c >> 6) & 0x3f), 0x80 | (c & 0x3f))
+    }
+  }
+  return new Uint8Array(out)
+}
 
 enum DeskState {
   /** Looking for a surface. Hint + reticle visible, desk hidden. */
@@ -90,6 +116,22 @@ export class DeskOS extends BaseScriptComponent {
   @input
   @allowUndefined
   micAudioTrack!: AudioTrackAsset
+
+  /**
+   * Preview-only capture rig. A second camera plus the RenderTarget it draws
+   * into, used so that a photo taken in Lens Studio contains the scene rather
+   * than the simulator's backdrop. Both optional: on device the real camera is
+   * the source and neither is read.
+   */
+  @input
+  @allowUndefined
+  @hint("Preview-only: camera that renders the scene into the capture target.")
+  previewCaptureCamera!: SceneObject
+
+  @input
+  @allowUndefined
+  @hint("Preview-only: render target the capture camera draws into.")
+  previewCaptureTarget!: Texture
 
   // Resolved in onAwake, NOT as a field initializer: field initializers run at
   // component construction, which can precede the camera being resolvable.
@@ -199,6 +241,9 @@ export class DeskOS extends BaseScriptComponent {
     // first frame, and asking for one at pinch time would make every capture
     // wait for that warm-up.
     this.capture.startCamera()
+    if (global.deviceInfoSystem.isEditor()) {
+      this.capture.useEditorStandIn(this.previewCaptureCamera, this.previewCaptureTarget)
+    }
   }
 
   // ── Frame loop ────────────────────────────────────────────────────────────
@@ -292,8 +337,21 @@ export class DeskOS extends BaseScriptComponent {
     this.capturing = true
 
     try {
+      // Count down before the shutter. Without it the frame is whatever you
+      // happened to be looking at when your finger moved, which is never the
+      // thing you meant to photograph. The hint card is head-locked, so the
+      // numbers stay in view while you look down at the note.
+      this.uiHint.setPanelVisible(true)
+      for (let n = CAPTURE_COUNTDOWN; n >= 1; n--) {
+        this.uiHint.setHint(String(n), "Look at what you want to capture", true)
+        this.audio?.playCardSelect()
+        await wait(1)
+      }
+      this.uiHint.setHint("Hold still", "", true)
       const frame = await this.capture.grabFrame()
+      this.uiHint.setPanelVisible(false)
       if (frame === null) {
+        this.uiHint.setPanelVisible(false)
         this.uiDesk.setStatus("Camera unavailable")
         return
       }
@@ -325,20 +383,44 @@ export class DeskOS extends BaseScriptComponent {
         )
       }
 
-      this.uiDesk.finishCapture(token, title, meta, null, slug)
-      this.textureCache[title] = frame.texture
-      this.uiDesk.setFileTexture(title, frame.texture)
+      // A photo of a sticky note is not usefully a photo. When the model reads
+      // the frame as writing, the capture changes kind: the card becomes a text
+      // file holding the bullet points, and the JPEG is never kept.
+      let asText = seen !== null && seen.kind === "text"
+      if (asText && seen !== null) {
+        if (!this.uiDesk.reseatCapture(token, "text" as ContentKind, title, meta, seen.body)) {
+          print("[DeskOS] No text reserve free in " + slug + " — keeping " + title + " as a photo.")
+          asText = false
+        }
+      }
+      const body = asText && seen !== null ? seen.body : null
+
+      this.uiDesk.finishCapture(token, title, meta, body, slug)
+      if (!asText) {
+        this.textureCache[title] = frame.texture
+        this.uiDesk.setFileTexture(title, frame.texture)
+      }
       this.uiDesk.setStatus(seen === null ? title : title + " — " + seen.rationale)
 
-      const stored = await this.cloud.uploadCapture(
-        "image" as ContentKind,
-        title,
-        meta,
-        slug,
-        frame.bytes,
-        "image/jpeg",
-        "jpg"
-      )
+      const stored = asText && body !== null
+        ? await this.cloud.uploadCapture(
+            "text" as ContentKind,
+            title,
+            meta,
+            slug,
+            utf8Bytes(body.join("\n")),
+            "text/plain",
+            "txt"
+          )
+        : await this.cloud.uploadCapture(
+            "image" as ContentKind,
+            title,
+            meta,
+            slug,
+            frame.bytes,
+            "image/jpeg",
+            "jpg"
+          )
       if (stored === null) {
         print("[DeskOS] " + title + " is on the desk but not in the cloud.")
       } else if (stored.storagePath !== null) {
@@ -724,13 +806,24 @@ export class DeskOS extends BaseScriptComponent {
     this.deskAnchor = anchor
 
     // Re-parent the UI panel onto the anchor. setParent keeps LOCAL transform,
-    // so we then set the local pose that lays the panel flat on the surface:
-    // a -90 deg X rotation maps panel-local +Z (its normal) onto anchor +Y.
+    // so we then set the local pose that stands the panel on the surface.
+    //
+    // A -90 deg X rotation would map panel-local +Z (its normal) onto anchor +Y
+    // and lay the tray perfectly flat. We rotate TRAY_TILT_DEG short of that,
+    // which tips the normal from straight-up towards the user — a lectern, or a
+    // Stream Deck.
+    //
+    // The lift is not decoration. Tilting about the panel's own centre buries
+    // its far half in the desk, so the panel is raised by half its depth times
+    // sin(tilt): that puts the NEAR edge back on the surface and lets the back
+    // edge rise, which is how a propped-up thing actually sits.
     const deskObj = this.uiDesk.getSceneObject()
     deskObj.setParent(anchor)
     const deskTr = deskObj.getTransform()
-    deskTr.setLocalPosition(new vec3(0, TRAY_SURFACE_LIFT, 0))
-    deskTr.setLocalRotation(quat.angleAxis(-Math.PI / 2, vec3.right()))
+    const tilt = (TRAY_TILT_DEG * Math.PI) / 180
+    const lift = TRAY_SURFACE_LIFT + (TRAY_H / 2) * Math.sin(tilt)
+    deskTr.setLocalPosition(new vec3(0, lift, 0))
+    deskTr.setLocalRotation(quat.angleAxis(-Math.PI / 2 + tilt, vec3.right()))
     deskTr.setLocalScale(vec3.one())
 
     this.buildHandle(anchor)

@@ -29,6 +29,8 @@
   ScriptInputsHidden:
     debugColliders: false
     micAudioTrack: false
+    previewCaptureCamera: false
+    previewCaptureTarget: false
     reticle: false
     uiDesk: false
     uiHint: false
@@ -46,6 +48,8 @@
       uiHint: !<MappingBased.AssignableType_2> 00000000-0000-0000-0000-000000000000
       reticle: !<MappingBased.AssignableType_3> 00000000-0000-0000-0000-000000000000
       micAudioTrack: !<reference.AudioTrackAsset> 00000000-0000-0000-0000-000000000000
+      previewCaptureCamera: !<reference.SceneObject> 00000000-0000-0000-0000-000000000000
+      previewCaptureTarget: !<reference.Texture> 00000000-0000-0000-0000-000000000000
   ScriptTypes:
     -
       {}
@@ -55,3 +59,5 @@
     - // @input AssignableType_2 uiHint
     - // @input AssignableType_3 reticle
     - // @input Asset.AudioTrackAsset micAudioTrack
+    - '// @input SceneObject previewCaptureCamera {"hint":"Preview-only: camera that renders the scene into the capture target."}'
+    - '// @input Asset.Texture previewCaptureTarget {"hint":"Preview-only: render target the capture camera draws into."}'

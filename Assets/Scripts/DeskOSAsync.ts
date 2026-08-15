@@ -44,3 +44,15 @@ export function withTimeout<T>(work: Promise<T>, seconds: number): Promise<T | n
     )
   })
 }
+
+/**
+ * Resolve after `seconds`.
+ *
+ * setTimeout in this runtime takes MILLISECONDS, which is the trap this helper
+ * exists to stop people falling into a second time.
+ */
+export function wait(seconds: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(() => resolve(), seconds * 1000)
+  })
+}
