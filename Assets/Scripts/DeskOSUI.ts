@@ -27,6 +27,7 @@ const ICON_IMAGE = requireAsset("../Icons/image.png") as Texture
 const ICON_VIDEO = requireAsset("../Icons/play_arrow.png") as Texture
 const ICON_AUDIO = requireAsset("../Icons/graphic_eq.png") as Texture
 const TEX_CARD_GLOW = requireAsset("../Icons/card_glow.png") as Texture
+const ICON_DELETE = requireAsset("../Icons/delete.png") as Texture
 
 // ── Typography: the single source of truth for text size + weight ────────────
 //
@@ -428,6 +429,25 @@ const TETHER_INSET = 4.0
  */
 const ADOPT_HYSTERESIS = 3.5
 
+// ── Bin ──────────────────────────────────────────────────────────────────────
+
+/** Mat-local home of the bin, in the strip below the folder row. */
+const BIN_POS = new vec2(-21.5, -13.4)
+const BIN_SIZE = new vec2(9.0, 6.0)
+
+/**
+ * How close a dragged file has to come before the bin claims it.
+ *
+ * Generous on purpose. Deleting is the one action here you cannot undo, so it
+ * should never happen by a near miss — but a target you have to hit precisely
+ * while holding something at arm's length is worse. The bin lights up well
+ * before it will take anything, so the commitment is visible before it is made.
+ */
+const BIN_RADIUS = 7.0
+const BIN_GLOW_SPEED = 12.0
+const BIN_FILL = new vec4(0.16, 0.10, 0.12, 0.9)
+const BIN_ACCENT = new vec4(1.0, 0.45, 0.42, 1)
+
 /** Extra glow on the folder that would adopt the file currently being dragged. */
 const ADOPT_GLOW_SPEED = 12.0
 
@@ -690,6 +710,12 @@ export class DeskOSUI extends BaseScriptComponent {
   private _onFileHover = new Event<string>()
   private _onFileRegrouped = new Event<string>()
   private _onFileOpened = new Event<string>()
+  private _onFileDeleted = new Event<string>()
+
+  private binPlate: RoundedRectangle | null = null
+  private binIcon: Image | null = null
+  /** Smoothed 0..1: how close the bin is to claiming what is being dragged. */
+  private binArm = 0
   private _onFolderGrabbed = new Event<string>()
   private _onFolderReleased = new Event<string>()
   private _onMoveRequested = new Event<void>()
@@ -720,6 +746,11 @@ export class DeskOSUI extends BaseScriptComponent {
   /** Fires when a file's spatial viewer is opened. Payload is the file name. */
   get onFileOpened(): PublicApi<string> {
     return this._onFileOpened.publicApi()
+  }
+
+  /** Fires with the file's name once it has been dropped in the bin. */
+  get onFileDeleted() {
+    return this._onFileDeleted.publicApi()
   }
 
   /** Fires when a folder is pinched and picked up. Payload is the folder id. */
@@ -981,6 +1012,8 @@ export class DeskOSUI extends BaseScriptComponent {
 
   private buildFolders(): void {
     const folders = this.obj(this.sceneObject, "Folders", new vec3(0, 0, FOLDERS_Z))
+
+    this.buildBin(folders)
 
     // Every glow is created before any card so the hierarchy DFS paints all
     // glows behind all cards — including a card dragged over a neighbour.
@@ -2053,6 +2086,74 @@ export class DeskOSUI extends BaseScriptComponent {
     }
   }
 
+  /**
+   * The bin: a target on the mat that removes what is dropped into it.
+   *
+   * It lives in the strip below the folder row, where nothing rests, so it is
+   * reachable without being in the way. Built before the folders so that a file
+   * dragged over it passes in front of it rather than behind.
+   */
+  private buildBin(parent: SceneObject): void {
+    const root = this.obj(parent, "Bin", new vec3(BIN_POS.x, BIN_POS.y, 0.02))
+
+    this.binPlate = this.plate(
+      root,
+      BIN_SIZE,
+      BIN_FILL,
+      1.2,
+      new vec3(0, 0, 0),
+      0.55
+    )
+
+    const iconObj = this.obj(root, "BinIcon", new vec3(0, 0.35, 0.08))
+    const img = iconObj.createComponent("Component.Image") as Image
+    const mat = imageMaterial.clone() // CLONE — never share across textures
+    mat.mainPass.baseTex = ICON_DELETE
+    mat.mainPass.depthTest = false
+    mat.mainPass.depthWrite = false
+    img.clearMaterials()
+    img.addMaterial(mat)
+    img.mainPass.baseColor = new vec4(BIN_ACCENT.x, BIN_ACCENT.y, BIN_ACCENT.z, 0.75)
+    iconObj.getTransform().setLocalScale(new vec3(2.6, 2.6, 1))
+    this.binIcon = img
+  }
+
+  /** True when a dragged chip is close enough for the bin to claim it. */
+  private overBin(item: ContentHandles): boolean {
+    const p = item.root.getTransform().getLocalPosition()
+    const dx = p.x - BIN_POS.x
+    const dy = p.y - BIN_POS.y
+    return Math.sqrt(dx * dx + dy * dy) < BIN_RADIUS
+  }
+
+  /**
+   * Drop a file for good.
+   *
+   * The chip goes back to the reserve pool rather than being destroyed —
+   * chips cannot be created after scene start, so a deleted file that took its
+   * chip with it would shrink the desk permanently. The name is read before
+   * parking, because parking clears it.
+   */
+  private binItem(item: ContentHandles): void {
+    const name = item.def.name
+    const owner = this.cardById(item.ownerId)
+
+    if (this.viewerItem === item) {
+      this.silenceViewer(this.viewer)
+      this.viewerItem = null
+    }
+
+    this.park(item)
+    if (owner !== null) {
+      const idx = owner.contents.indexOf(item)
+      if (idx >= 0) owner.contents.splice(idx, 1)
+      this.reflowRing(owner)
+      this.refreshOpenDuration(owner)
+    }
+    this.binArm = 0
+    this._onFileDeleted.invoke(name)
+  }
+
   /** One mock content chip. Silhouette, accent and body treatment all differ per kind. */
   private buildContentCard(
     root: SceneObject,
@@ -2176,6 +2277,12 @@ export class DeskOSUI extends BaseScriptComponent {
       })
       manip.onManipulationEnd.add(() => {
         item.grabbed = false
+        // The bin gets first refusal, and only on a real drag — a tap near it
+        // must never delete anything.
+        if (item.dragged && this.overBin(item)) {
+          this.binItem(item)
+          return
+        }
         // Only a real reposition gets tidied and re-filed. SIK reports a plain
         // tap as a manipulation too, so leaving this unconditional meant every
         // tap ran the adopt path and could hand the file to whichever folder
@@ -2401,6 +2508,32 @@ export class DeskOSUI extends BaseScriptComponent {
     const dt = getDeltaTime()
     this.resolvePendingSnaps()
     const adoptId = this.adoptCandidate()
+
+    // The bin arms itself while a file is dragged into range, so the commitment
+    // is visible before it is made rather than discovered afterwards.
+    let binWanted = 0
+    for (const item of this.allContents) {
+      if (item.grabbed && item.dragged && this.overBin(item)) binWanted = 1
+    }
+    this.binArm += (binWanted - this.binArm) * Math.min(1, dt * BIN_GLOW_SPEED)
+    if (this.binPlate !== null) {
+      const a = this.binArm
+      this.binPlate.opacity = 0.55 + 0.45 * a
+      this.binPlate.backgroundColor = new vec4(
+        BIN_FILL.x + (BIN_ACCENT.x - BIN_FILL.x) * a * 0.55,
+        BIN_FILL.y + (BIN_ACCENT.y - BIN_FILL.y) * a * 0.55,
+        BIN_FILL.z + (BIN_ACCENT.z - BIN_FILL.z) * a * 0.55,
+        BIN_FILL.w
+      )
+    }
+    if (this.binIcon !== null) {
+      this.binIcon.mainPass.baseColor = new vec4(
+        BIN_ACCENT.x,
+        BIN_ACCENT.y,
+        BIN_ACCENT.z,
+        0.75 + 0.25 * this.binArm
+      )
+    }
     const kLift = Math.min(1, dt * CARD_LIFT_SPEED)
     const kScale = Math.min(1, dt * CARD_SCALE_SPEED)
 

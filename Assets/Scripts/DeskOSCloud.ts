@@ -331,6 +331,52 @@ export class DeskOSCloud {
     print("[DeskOSCloud] Seeded " + fileRows.length + " files.")
   }
 
+  /**
+   * Remove one file: its stored object first, then its row.
+   *
+   * Object before row, because the row is what remembers where the object
+   * lives. Losing the row first would leave the upload behind with nothing
+   * pointing at it, and nothing to find it by later.
+   *
+   * RLS already bounds every statement to the signed-in user; the explicit
+   * name match is what makes this one file rather than all of them.
+   */
+  async deleteFile(name: string): Promise<boolean> {
+    const client = this.client
+    if (client === null) return false
+
+    const found = await client
+      .from("desk_files")
+      .select("id, storage_path")
+      .eq("name", name)
+      .limit(1)
+    if (found.error !== null) {
+      print("[DeskOSCloud] Delete lookup failed: " + JSON.stringify(found.error))
+      return false
+    }
+    if (found.data.length === 0) {
+      print("[DeskOSCloud] Nothing to delete for '" + name + "'.")
+      return false
+    }
+
+    const row = found.data[0]
+    const path = row.storage_path
+    if (path !== null && path !== undefined && String(path).length > 0) {
+      const removed = await client.storage.from(BUCKET).remove([String(path)])
+      if (removed.error !== null) {
+        print("[DeskOSCloud] Object remove failed: " + JSON.stringify(removed.error))
+      }
+    }
+
+    const gone = await client.from("desk_files").delete().eq("id", row.id)
+    if (gone.error !== null) {
+      print("[DeskOSCloud] Row delete failed: " + JSON.stringify(gone.error))
+      return false
+    }
+    print("[DeskOSCloud] Deleted '" + name + "'.")
+    return true
+  }
+
   private async readDesk(): Promise<CloudDesk | null> {
     const client = this.client
     if (client === null) return false as unknown as null

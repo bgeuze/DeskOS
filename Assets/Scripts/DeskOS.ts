@@ -9,6 +9,10 @@ import {InteractableManipulation} from "SpectaclesInteractionKit.lspkg/Component
 import WorldCameraFinderProvider from "SpectaclesInteractionKit.lspkg/Providers/CameraProvider/WorldCameraFinderProvider"
 
 import {wait} from "./DeskOSAsync"
+
+const glowMaterial = requireAsset("../Materials/ImageMaterial.mat") as Material
+const TEX_TRAY_GLOW = requireAsset("../Icons/tray_glow.png") as Texture
+const TEX_KNOB_GLOW = requireAsset("../Icons/knob_glow.png") as Texture
 import {DeskOSUI, TRAY_H} from "./DeskOSUI"
 import {DeskOSHintUI} from "./DeskOSHintUI"
 import {PlacementReticle} from "./PlacementReticle"
@@ -44,6 +48,24 @@ const internetModule = require("LensStudio:InternetModule") as InternetModule
 
 /** Gap between one file being re-filed and the next, so the move stays readable. */
 const TIDY_STAGGER_MS = 550
+
+/**
+ * Contact glow on the surface, in cm — the generated art's own dimensions.
+ *
+ * Grounding by LIGHT, not by shade. On an additive see-through display black is
+ * transparent, so a drop shadow renders as nothing on device; this project
+ * already rebuilt one shadow into a glow for exactly that reason. A faint pool
+ * of accent under the tray and around the knob is the version that survives
+ * both the preview and the glasses.
+ */
+const TRAY_GLOW_CM = new vec2(76, 49)
+const KNOB_GLOW_CM = new vec2(13, 13)
+
+/** Barely there. A contact cue should be felt rather than noticed. */
+const CONTACT_GLOW_ALPHA = 0.16
+
+/** Lift off the surface, to stay clear of z-fighting with the desk itself. */
+const CONTACT_GLOW_LIFT = 0.12
 
 /** Seconds counted down before a photo is taken. */
 const CAPTURE_COUNTDOWN = 3
@@ -194,6 +216,7 @@ export class DeskOS extends BaseScriptComponent {
     // UI event bus — data flows out of the panels as typed events.
     this.uiDesk.onFolderSelected.add((id: string) => this.onFolderSelected(id))
     this.uiDesk.onCapturePhoto.add(() => this.onCapturePhoto())
+    this.uiDesk.onFileDeleted.add((name: string) => this.onFileDeleted(name))
     this.uiDesk.onToggleRecord.add(() => this.onToggleRecord())
     this.uiDesk.onVoiceRequested.add(() => this.onVoiceRequested())
     this.uiDesk.onFolderHoverEnter.add(() => this.audio?.playCardHover())
@@ -332,6 +355,26 @@ export class DeskOS extends BaseScriptComponent {
    * understanding is a nicety, the upload is durability. Losing the later ones
    * degrades the result but never discards what the user actually did.
    */
+  /**
+   * A file was dropped in the bin.
+   *
+   * The desk has already let go of it — the chip went back to the reserve pool
+   * the moment it was dropped, because a delete that waits for a round trip
+   * reads as a delete that failed. The cloud catches up afterwards, and says so
+   * if it cannot.
+   */
+  private async onFileDeleted(name: string): Promise<void> {
+    this.uiDesk.setStatus("Deleted " + name)
+    this.audio?.playCardSelect()
+    delete this.textureCache[name]
+
+    const gone = await this.cloud.deleteFile(name)
+    if (!gone) {
+      print("[DeskOS] " + name + " is off the desk but still in the cloud.")
+      this.uiDesk.setStatus(name + " — removed here, not in the cloud")
+    }
+  }
+
   private async onCapturePhoto(): Promise<void> {
     if (this.capturing) return
     this.capturing = true
@@ -826,6 +869,17 @@ export class DeskOS extends BaseScriptComponent {
     deskTr.setLocalRotation(quat.angleAxis(-Math.PI / 2 + tilt, vec3.right()))
     deskTr.setLocalScale(vec3.one())
 
+    // Light pools where the desk meets the surface, so the tray reads as resting
+    // on something rather than hovering over it.
+    this.buildContactGlow(anchor, "TrayGlow", TEX_TRAY_GLOW, TRAY_GLOW_CM, new vec3(0, 0, 0))
+    this.buildContactGlow(
+      anchor,
+      "HandleGlow",
+      TEX_KNOB_GLOW,
+      KNOB_GLOW_CM,
+      new vec3(HANDLE_ANCHOR_POS.x, 0, HANDLE_ANCHOR_POS.z)
+    )
+
     this.buildHandle(anchor)
   }
 
@@ -837,6 +891,39 @@ export class DeskOS extends BaseScriptComponent {
    * leaf child. That keeps ColliderComponent.shape.size in true centimetres
    * (scale on a collider-bearing node silently rescales the hit volume).
    */
+  /**
+   * One flat pool of light lying on the surface.
+   *
+   * -90 deg about X turns the image's own +Z (its normal) onto anchor +Y, the
+   * same mapping the tray uses, so the art lies face-up on the desk. Image
+   * components read localScale as size, so the rotation and the size do not
+   * fight each other.
+   */
+  private buildContactGlow(
+    anchor: SceneObject,
+    name: string,
+    texture: Texture,
+    sizeCm: vec2,
+    at: vec3
+  ): void {
+    const object = global.scene.createSceneObject(name)
+    object.setParent(anchor)
+
+    const image = object.createComponent("Component.Image") as Image
+    const material = glowMaterial.clone() // CLONE — never share across textures
+    material.mainPass.baseTex = texture
+    material.mainPass.depthTest = false
+    material.mainPass.depthWrite = false
+    image.clearMaterials()
+    image.addMaterial(material)
+    image.mainPass.baseColor = new vec4(0.35, 0.85, 0.92, CONTACT_GLOW_ALPHA)
+
+    const transform = object.getTransform()
+    transform.setLocalPosition(new vec3(at.x, CONTACT_GLOW_LIFT, at.z))
+    transform.setLocalRotation(quat.angleAxis(-Math.PI / 2, vec3.right()))
+    transform.setLocalScale(new vec3(sizeCm.x, sizeCm.y, 1))
+  }
+
   private buildHandle(anchor: SceneObject): void {
     const wrapper = global.scene.createSceneObject("DeskHandleWrapper")
     wrapper.setParent(anchor)
