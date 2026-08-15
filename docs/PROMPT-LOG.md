@@ -48,6 +48,10 @@ the platform refuse, so the log carries a real reason instead of ours.*
 ## 2. Measurement beats reasoning: the "hang"
 
 > "Hmm op de een of andere manier lijkt de lens vast te lopen? wellicht bij het nemen van een foto ofzo?"
+>
+> *("Somehow the Lens seems to freeze? maybe when taking a photo or something?" — the prompts in this
+> project were written in Dutch; this one is quoted verbatim because the diagnosis it triggered is
+> the point.)*
 
 The obvious suspect was the JPEG encode. It was instrumented rather than optimised:
 
