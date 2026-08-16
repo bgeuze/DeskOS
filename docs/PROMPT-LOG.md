@@ -2,7 +2,7 @@
 
 A curated log, not a transcript. What follows is the handful of moments where agent-driven
 development changed the outcome: what we believed, what the measurement said, and what changed
-because of it.
+because of it. The prompts themselves are in [PROMPTS.md](PROMPTS.md) — 17 of the 70, selected.
 
 The through-line is uncomfortable and worth stating up front: **the agent's reasoning was wrong far
 more often than its measurements.** Every hour lost in this project was lost to a plausible

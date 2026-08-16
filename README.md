@@ -70,7 +70,8 @@ real text on them so the capture pipeline has something to read.
 
 The interesting part of this project is not that a model wrote the code. It is what agent-driven
 development found that would otherwise have shipped broken. A curated log lives in
-[`docs/PROMPT-LOG.md`](docs/PROMPT-LOG.md); the headlines:
+[`docs/PROMPT-LOG.md`](docs/PROMPT-LOG.md), with the prompts behind it in
+[`docs/PROMPTS.md`](docs/PROMPTS.md); the headlines:
 
 **Three "device-only" limitations were configuration.** Networking, the camera and the microphone
 were each behind an `isEditor()` guard written on the assumption that Preview could not reach them.

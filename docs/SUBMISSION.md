@@ -1,7 +1,7 @@
 # DeskOS — submission
 
 **Repo:** https://github.com/bgeuze/DeskOS
-**Prompt log:** [docs/PROMPT-LOG.md](PROMPT-LOG.md)
+**Prompt log:** [docs/PROMPT-LOG.md](PROMPT-LOG.md) · [selected prompts](PROMPTS.md)
 **Built with:** Lens Studio 5.22, target SPECS 27, CLAD (Claude Code + the Lens Studio MCP)
 
 ---
@@ -27,6 +27,34 @@ went instead of being shown a new layout. Drag something to the bin and it comes
 apart and is gone, from the desk and from the cloud.
 
 Everything persists in Snap Cloud: folders, files, and the media itself.
+
+---
+
+## Theme — Organize
+
+Week 1 asked for a spatial experience that helps people organize, plan or be
+more productive.
+
+Most filing tools leave the organizing to you. You name the thing, you pick the
+folder, you drag it into place — and because that is work, you skip it, and the
+notes stay on the desk. DeskOS moves that work to the moment of capture. You
+look at something and pinch; the model decides what it should *become* and where
+it belongs, and shows you the one line of reasoning behind the choice.
+
+The organizing happens because you looked at something, not because you filed
+it. Four sticky notes become one document with four bullets — not four photos of
+sticky notes in a folder called Photos.
+
+## Who it is for
+
+People who think on paper and then lose it there: sticky notes, whiteboards,
+printed pages, the back of an envelope. The capture is never the problem —
+transcribing it is, so it does not get done.
+
+That is a wide group, but the Specs version of it is specific: someone already
+wearing the glasses at a desk, whose hands are busy and who is not going to stop
+and type. The interaction budget is a glance and a pinch, and DeskOS is built to
+fit inside it.
 
 ---
 
